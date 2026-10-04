@@ -302,14 +302,18 @@
         socket.on('playersList', (players) => {
             players.forEach(p => {
                 if (p.id !== myPlayerId) {
-                    remotePlayers.set(p.id, createRemoteVehicle(p));
+                    const vehicle = createRemoteVehicle(p);
+                    vehicle.initWeaponSystems();
+                    remotePlayers.set(p.id, vehicle);
                 }
             });
         });
 
         socket.on('newPlayer', (playerData) => {
             if (playerData.id !== myPlayerId) {
-                remotePlayers.set(playerData.id, createRemoteVehicle(playerData));
+                const vehicle = createRemoteVehicle(playerData);
+                vehicle.initWeaponSystems();
+                remotePlayers.set(playerData.id, vehicle);
                 showMessage('Игрок присоединился!');
             }
         });
@@ -369,6 +373,25 @@
             remotePlayers.delete(data.id);
         });
 
+        socket.on('botsUpdate', (botsData) => {
+            botsData.forEach(bot => {
+                if (!remotePlayers.has(bot.id)) {
+                    const vehicle = createRemoteVehicle(bot);
+                    vehicle.initWeaponSystems();
+                    remotePlayers.set(bot.id, vehicle);
+                } else {
+                    const existingBot = remotePlayers.get(bot.id);
+                    existingBot.x = bot.x;
+                    existingBot.y = bot.y;
+                    existingBot.angle = bot.angle;
+                    existingBot.vx = bot.vx;
+                    existingBot.vy = bot.vy;
+                    existingBot.hp = bot.hp;
+                    existingBot.active = bot.active;
+                }
+            });
+        });
+
         function createRemoteVehicle(data) {
             const vehicle = {
                 id: data.id,
@@ -391,13 +414,15 @@
                 isRemote: true,
                 isPlayer: false
             };
-            // Создаём weapon systems для удалённого игрока
-            if (data.config && data.config.hull && data.config.hull.mounts) {
-                data.config.hull.mounts.forEach(m => {
-                    const w = data.config.weapons[m.id];
-                    if (w) vehicle.weaponSystems.push(new WeaponSystem(m, w, vehicle));
-                });
-            }
+            // Создаём weapon systems для удалённого игрока (отложено до определения WeaponSystem)
+            vehicle.initWeaponSystems = function() {
+                if (this.config && this.config.hull && this.config.hull.mounts) {
+                    this.config.hull.mounts.forEach(m => {
+                        const w = this.config.weapons[m.id];
+                        if (w) this.weaponSystems.push(new WeaponSystem(m, w, this));
+                    });
+                }
+            };
             return vehicle;
         }
 
@@ -1590,8 +1615,7 @@ function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math
                 GameState.camera.x = canvas.width / 2 - sp0.x; GameState.camera.y = canvas.height / 2 - sp0.y;
                 GameState.entities.push(playerVehicle);
                 
-                // Боты остаются на клиенте
-                createTarget(); createTarget();
+                // Боты теперь синхронизируются с сервера
                 updateHUD();
                 showMessage("Остров в океане. ПКМ - захват цели, колесо - зум. Мультиплеер активен.");
             }
