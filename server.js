@@ -22,7 +22,7 @@ app.get('/', (req, res) => {
 
 // Хранилище игроков
 const players = new Map();
-let hostId = null; // ID хоста (кто создаёт ботов)
+let hostId = null; // ID хоста (кто создаёт ботов) - больше не нужен
 
 // Генерация уникального ID
 function generateId() {
@@ -35,15 +35,6 @@ io.on('connection', (socket) => {
   // Присваиваем ID при подключении
   const playerId = generateId();
   socket.emit('playerJoined', { id: playerId });
-
-  // Если хоста нет, первый игрок становится хостом
-  if (!hostId) {
-    hostId = playerId;
-    socket.emit('setHost', { isHost: true });
-    console.log('Хост назначен:', playerId);
-  } else {
-    socket.emit('setHost', { isHost: false, hostId: hostId });
-  }
 
   // Игрок отправляет свои данные при входе в бой
   socket.on('joinGame', (playerData) => {
@@ -93,13 +84,6 @@ io.on('connection', (socket) => {
         vx: player.vx,
         vy: player.vy
       });
-    }
-  });
-
-  // Хост синхронизирует ботов
-  socket.on('botsUpdate', (botsData) => {
-    if (playerId === hostId) {
-      socket.broadcast.emit('botsUpdate', botsData);
     }
   });
 
@@ -157,24 +141,6 @@ io.on('connection', (socket) => {
       if (player.socketId === socket.id) {
         players.delete(id);
         io.emit('playerRemoved', { id });
-        
-        // Если отключился хост, назначаем нового
-        if (id === hostId) {
-          hostId = null;
-          const remainingPlayers = Array.from(players.keys());
-          if (remainingPlayers.length > 0) {
-            hostId = remainingPlayers[0];
-            // Уведомляем нового хоста
-            const newHostSocket = Array.from(io.sockets.sockets.values()).find(s => {
-              const p = Array.from(players.entries()).find(([pid, pl]) => pid === hostId && pl.socketId === s.id);
-              return p !== undefined;
-            });
-            if (newHostSocket) {
-              newHostSocket.emit('setHost', { isHost: true });
-            }
-            console.log('Новый хост:', hostId);
-          }
-        }
         break;
       }
     }
