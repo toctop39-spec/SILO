@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>2D War Strategy - Deep Customization</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js" onerror="console.log('Socket.io недоступен - одиночный режим')"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
 
@@ -286,278 +287,74 @@
     </div>
 
     <script>
-        // Socket.io подключение (опциональное)
+        // Socket.io подключение (минимальное вмешательство)
         let socket = null;
         let myPlayerId = null;
         const remotePlayers = new Map();
-        const remoteProjectiles = new Map();
-        let socketConnected = false;
 
-        // Проверяем доступность Socket.io и подключаемся
-        function initSocket() {
-            if (typeof io === 'undefined') {
-                console.log('Socket.io недоступен - игра в одиночном режиме');
-                return;
-            }
-            
-            try {
-                socket = io();
-                
-                socket.on('connect_error', (err) => {
-                    console.error('Ошибка подключения к серверу:', err);
-                    socketConnected = false;
-                    socket = null;
-                });
-
-                socket.on('connect', () => {
-                    console.log('Подключено к серверу');
-                    socketConnected = true;
-                });
-
-                socket.on('disconnect', () => {
-                    console.log('Отключено от сервера');
-                    socketConnected = false;
-                });
-
-                socket.on('playerJoined', (data) => {
-                    myPlayerId = data.id;
-                    console.log('Мой ID:', myPlayerId);
-                });
-
-                socket.on('playersList', (players) => {
-                    players.forEach(p => {
-                        if (p.id !== myPlayerId) {
-                            const vehicle = createRemoteVehicle(p);
-                            vehicle.initWeaponSystems();
-                            remotePlayers.set(p.id, vehicle);
-                        }
-                    });
-                });
-
-                socket.on('newPlayer', (playerData) => {
-                    if (playerData.id !== myPlayerId) {
-                        const vehicle = createRemoteVehicle(playerData);
-                        vehicle.initWeaponSystems();
-                        remotePlayers.set(playerData.id, vehicle);
-                        showMessage('Игрок присоединился!');
-                    }
-                });
-
-                socket.on('playerMoved', (data) => {
-                    const remotePlayer = remotePlayers.get(data.id);
-                    if (remotePlayer) {
-                        remotePlayer.x = data.x;
-                        remotePlayer.y = data.y;
-                        remotePlayer.angle = data.angle;
-                        remotePlayer.vx = data.vx;
-                        remotePlayer.vy = data.vy;
-                    }
-                });
-
-                socket.on('projectileFired', (data) => {
-                    if (data.playerId !== myPlayerId) {
-                        const proj = new RemoteProjectile(data);
-                        remoteProjectiles.set(data.id, proj);
-                        GameState.projectiles.push(proj);
-                    }
-                });
-
-                socket.on('playerHit', (data) => {
-                    const remotePlayer = remotePlayers.get(data.targetId);
-                    if (remotePlayer) {
-                        remotePlayer.hp = data.hp;
-                        remotePlayer.mods = data.mods;
-                        remotePlayer.flood = data.flood;
-                        remotePlayer.fire = data.fire;
-                    }
-                });
-
-                socket.on('playerDied', (data) => {
-                    const remotePlayer = remotePlayers.get(data.id);
-                    if (remotePlayer) {
-                        remotePlayer.hp = 0;
-                        remotePlayer.dead = data.cause;
-                        remotePlayer.active = false;
-                    }
-                });
-
-                socket.on('playerRespawned', (data) => {
-                    const remotePlayer = remotePlayers.get(data.id);
-                    if (remotePlayer) {
-                        remotePlayer.x = data.x;
-                        remotePlayer.y = data.y;
-                        remotePlayer.angle = data.angle;
-                        remotePlayer.hp = data.hp;
-                        remotePlayer.maxHp = data.maxHp;
-                        remotePlayer.active = true;
-                        remotePlayer.dead = null;
-                    }
-                });
-
-                socket.on('playerRemoved', (data) => {
-                    remotePlayers.delete(data.id);
-                });
-
-                socket.on('botsUpdate', (botsData) => {
-                    botsData.forEach(bot => {
-                        if (!remotePlayers.has(bot.id)) {
-                            const vehicle = createRemoteVehicle(bot);
-                            vehicle.initWeaponSystems();
-                            remotePlayers.set(bot.id, vehicle);
-                        } else {
-                            const existingBot = remotePlayers.get(bot.id);
-                            existingBot.x = bot.x;
-                            existingBot.y = bot.y;
-                            existingBot.angle = bot.angle;
-                            existingBot.vx = bot.vx;
-                            existingBot.vy = bot.vy;
-                            existingBot.hp = bot.hp;
-                            existingBot.active = bot.active;
-                        }
-                    });
-                });
-            } catch (e) {
-                console.error('Ошибка инициализации Socket.io:', e);
-                socket = null;
-            }
-        }
-
-        // Загружаем Socket.io динамически
-        const script = document.createElement('script');
-        script.src = '/socket.io/socket.io.js';
-        script.onload = initSocket;
-        script.onerror = () => {
-            console.log('Socket.io недоступен - игра в одиночном режиме');
-        };
-        document.head.appendChild(script);
-
-        function createRemoteVehicle(data) {
-            // Создаём простой объект с данными
-            const vehicle = {
-                id: data.id,
-                x: data.x,
-                y: data.y,
-                angle: data.angle,
-                vx: data.vx,
-                vy: data.vy,
-                hull: data.hull,
-                hp: data.hp,
-                maxHp: data.maxHp,
-                team: data.team,
-                config: data.config,
-                weaponSystems: [],
-                active: data.active,
-                dead: null,
-                flood: 0,
-                fire: false,
-                mods: { engine: 1, tracks: 1, crew: 1 },
-                isRemote: true,
-                isPlayer: false
-            };
-            
-            // Добавляем метод draw, делегирующий Vehicle.draw
-            vehicle.draw = function(ctx) {
-                // Временный объект с минимальными данными для отрисовки
-                const tempVehicle = {
-                    x: this.x,
-                    y: this.y,
-                    angle: this.angle,
-                    hull: this.hull,
-                    hp: this.hp,
-                    maxHp: this.maxHp,
-                    team: this.team,
-                    config: this.config,
-                    weaponSystems: this.weaponSystems,
-                    dead: this.dead,
-                    flood: this.flood,
-                    fire: this.fire,
-                    mods: this.mods,
-                    isPlayer: false,
-                    isRemote: true
-                };
-                
-                // Используем прототип Vehicle для отрисовки
-                Vehicle.prototype.draw.call(tempVehicle, ctx);
-            };
-            
-            // Создаём weapon systems для удалённого игрока (отложено до определения WeaponSystem)
-            vehicle.initWeaponSystems = function() {
-                if (this.config && this.config.hull && this.config.hull.mounts) {
-                    this.config.hull.mounts.forEach(m => {
-                        const w = this.config.weapons[m.id];
-                        if (w) this.weaponSystems.push(new WeaponSystem(m, w, this));
-                    });
+        if (typeof io !== 'undefined') {
+            socket = io();
+            socket.on('connect', () => {
+                console.log('Подключено к серверу мультиплеера');
+            });
+            socket.on('disconnect', () => {
+                console.log('Отключено от сервера');
+            });
+            socket.on('playerJoined', (data) => {
+                myPlayerId = data.id;
+                console.log('Мой ID:', myPlayerId);
+            });
+            socket.on('newPlayer', (playerData) => {
+                if (playerData.id !== myPlayerId) {
+                    // Создаём удалённого игрока как обычный Vehicle
+                    const remoteVehicle = new Vehicle(playerData.x, playerData.y, playerData.config, false, playerData.team);
+                    remoteVehicle.id = playerData.id;
+                    remoteVehicle.hp = playerData.hp;
+                    remoteVehicle.maxHp = playerData.maxHp;
+                    remoteVehicle.angle = playerData.angle;
+                    remotePlayers.set(playerData.id, remoteVehicle);
+                    console.log('Игрок присоединился:', playerData.id);
                 }
-            };
-            return vehicle;
-        }
-
-        class RemoteProjectile {
-            constructor(data) {
-                this.x = data.x;
-                this.y = data.y;
-                this.angle = data.angle;
-                this.data = data.weaponData;
-                this.team = data.team;
-                this.active = true;
-                this.age = 0;
-                this.life = this.data.range / this.data.vel + 0.2;
-                this.trail = [];
-                this.v = this.data.vel;
-                this.vx = Math.cos(this.angle) * this.v;
-                this.vy = Math.sin(this.angle) * this.v;
-            }
-
-            update(dt) {
-                this.age += dt;
-                this.x += this.vx * dt;
-                this.y += this.vy * dt;
-                this.trail.push({x: this.x, y: this.y});
-                if (this.trail.length > 14) this.trail.shift();
-                this.life -= dt;
-                if (this.life <= 0) this.active = false;
-
-                // Проверка попадания в локальных сущностей
-                for (const e of GameState.entities) {
-                    if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active || e.team === this.team) continue;
-                    const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
-                    if (dx * dx + dy * dy > L * L) continue;
-                    const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
-                    if (Math.abs(lx) < L / 2 + 1 && Math.abs(ly) < e.hull.size.w / 2 + 1) {
-                        e.takeDamage(this.data.dmg, this.data.pen, this.x, this.y, this.angle);
-                        this.blast();
-                        this.active = false;
-                        return true;
-                    }
+            });
+            socket.on('playerMoved', (data) => {
+                const remotePlayer = remotePlayers.get(data.id);
+                if (remotePlayer) {
+                    remotePlayer.x = data.x;
+                    remotePlayer.y = data.y;
+                    remotePlayer.angle = data.angle;
+                    remotePlayer.vx = data.vx;
+                    remotePlayer.vy = data.vy;
                 }
-            }
-
-            blast() {
-                const d = this.data;
-                createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
-            }
-
-            draw(ctx) {
-                const d = this.data;
-                if (this.trail.length > 1) {
-                    ctx.globalCompositeOperation = 'lighter';
-                    ctx.beginPath();
-                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
-                    for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
-                    ctx.strokeStyle = d.color;
-                    ctx.globalAlpha = 0.6;
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                    ctx.globalAlpha = 1;
-                    ctx.globalCompositeOperation = 'source-over';
+            });
+            socket.on('playerRemoved', (data) => {
+                remotePlayers.delete(data.id);
+                // Удаляем из entities если там есть
+                GameState.entities = GameState.entities.filter(e => e.id !== data.id);
+            });
+            socket.on('projectileFired', (data) => {
+                if (data.playerId !== myPlayerId) {
+                    // Создаём снаряд от другого игрока
+                    const proj = new Projectile(data.x, data.y, data.angle, data.weaponData, data.team, null);
+                    GameState.projectiles.push(proj);
                 }
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = '#fff3b0';
-                ctx.fillRect(0, -1.2, 14, 2.4);
-                ctx.restore();
-            }
+            });
+            socket.on('playerHit', (data) => {
+                const remotePlayer = remotePlayers.get(data.targetId);
+                if (remotePlayer) {
+                    remotePlayer.hp = data.hp;
+                    remotePlayer.mods = data.mods;
+                    remotePlayer.flood = data.flood;
+                    remotePlayer.fire = data.fire;
+                }
+            });
+            socket.on('playerDied', (data) => {
+                const remotePlayer = remotePlayers.get(data.id);
+                if (remotePlayer) {
+                    remotePlayer.hp = 0;
+                    remotePlayer.dead = data.cause;
+                    remotePlayer.active = false;
+                }
+            });
         }
 
         // Size ratings: 1 = Light, 2 = Medium, 3 = Heavy
@@ -902,13 +699,14 @@
                     const perpY = Math.sin(this.angle + Math.PI/2) * 4;
                     const side = (this.burstShotsLeft % 2 === 0) ? 1 : -1; // alternate barrels
                     
-                    GameState.projectiles.push(new Projectile(
+                    const proj = new Projectile(
                         tipX + perpX*side, tipY + perpY*side, this.angle, this.data, this.vehicle.team, this.vehicle
-                    ));
+                    );
+                    GameState.projectiles.push(proj);
                     createExplosion(tipX + perpX*side, tipY + perpY*side, 15, '#fbbf24', 5);
-
-                    // Синхронизация выстрела
-                    if (this.vehicle.isPlayer && myPlayerId) {
+                    
+                    // Синхронизация выстрела с сервером
+                    if (this.vehicle.isPlayer && socket && myPlayerId) {
                         socket.emit('fire', {
                             playerId: myPlayerId,
                             x: tipX + perpX*side,
@@ -919,13 +717,14 @@
                         });
                     }
                 } else {
-                    GameState.projectiles.push(new Projectile(
+                    const proj = new Projectile(
                         tipX, tipY, this.angle, this.data, this.vehicle.team, this.vehicle
-                    ));
+                    );
+                    GameState.projectiles.push(proj);
                     createExplosion(tipX, tipY, 10, '#fbbf24', 5);
-
-                    // Синхронизация выстрела
-                    if (this.vehicle.isPlayer && myPlayerId) {
+                    
+                    // Синхронизация выстрела с сервером
+                    if (this.vehicle.isPlayer && socket && myPlayerId) {
                         socket.emit('fire', {
                             playerId: myPlayerId,
                             x: tipX,
@@ -1181,7 +980,7 @@ function calcTop(h, eng, mass) { let v = 0; for (let i = 0; i < 1500; i++) v += 
 
 class Vehicle {
   constructor(x, y, config, isPlayer, team) {
-    this.id = myPlayerId || 'local';
+    this.id = myPlayerId || 'local_' + Math.random().toString(36).substr(2, 9); // ID для мультиплеера
     this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.angle = 0; this.yaw = 0;
     this.config = config; this.isPlayer = isPlayer; this.team = team; this.active = true;
     this.hull = config.hull; this.engine = config.engine;
@@ -1278,8 +1077,8 @@ class Vehicle {
     if (m.crew > 0) this.weaponSystems.forEach(ws => ws.update(dt, tx, ty, trig));
     if (this.isPlayer) updateHUD();
 
-    // Синхронизация с сервером (только для игрока)
-    if (this.isPlayer && myPlayerId && socket) {
+    // Синхронизация позиции с сервером (только для игрока)
+    if (this.isPlayer && socket && myPlayerId) {
         socket.emit('playerUpdate', {
             id: myPlayerId,
             x: this.x,
@@ -1313,17 +1112,15 @@ class Vehicle {
         if (lx < 0) m.engine = Math.max(0, m.engine - k * 1.5); else m.crew = Math.max(0, m.crew - k);
       } else {
         if (lx < -l * .25) m.engine = Math.max(0, m.engine - k * 1.6);
-        else if (Math.abs(ly) > w * .6) m.tracks = Math.max(0, m.tracks - k * 1.8);
-        else m.crew = Math.max(0, m.crew - k * 1.2);
-        if (h.drawType === 'tank' && Math.abs(lx) < l * .5 && Math.random() < .1 + k * .5) { this.die('ammo'); return; }
+        if (lx > l * .25) m.crew = Math.max(0, m.crew - k);
+        if (Math.abs(lx) < l * .25) m.tracks = Math.max(0, m.tracks - k * 2);
       }
+    } else {
+      if (Math.random() < .3) m.tracks = Math.max(0, m.tracks - k * .5);
     }
-    if (m.engine < .5 && !this.fire && Math.random() < .6) { this.fire = true; if (this.isPlayer) showMessage("Пожар в моторном отсеке!"); }
-    if (this.hp <= 0) this.die(ship && this.flood > .2 ? 'sunk' : 'hp'); else if (m.crew <= 0) this.die('crew');
-    if (this.isPlayer) updateHUD();
-
-    // Синхронизация урона
-    if (this.isPlayer && myPlayerId) {
+    if (this.hp <= 0) this.die(full ? 'destroyed' : 'flooded');
+    // Синхронизация урона с сервером (только для игрока)
+    if (this.isPlayer && socket && myPlayerId) {
         socket.emit('hit', {
             targetId: myPlayerId,
             hp: this.hp,
@@ -1342,13 +1139,14 @@ class Vehicle {
     else if (cause === 'crew') createExplosion(this.x, this.y, 12, '#888', 8);
     else createExplosion(this.x, this.y, big * (cause === 'ammo' ? 1.8 : 1), '#f97316', cause === 'ammo' ? 60 : 35);
     const T = {sunk:'КОРАБЛЬ ЗАТОНУЛ', ammo:'ДЕТОНАЦИЯ БОЕКОМПЛЕКТА', crew:'ЭКИПАЖ ВЫБИТ', fire:'СГОРЕЛ', hp:'ТЕХНИКА УНИЧТОЖЕНА'};
-    if (this.isPlayer) { showMessage(T[this.dead]); setTimeout(() => switchMode('garage'), 3500); }
-    else { if (GameState.mode === 'combat' && playerVehicle && playerVehicle.hp > 0) { const b = bounty(this); GameState.pp += b; savePP(); showMessage('Уничтожен: +' + b + ' PP'); }
-      setTimeout(() => { if (GameState.mode === 'combat') createTarget(); }, 4000); }
-
-    // Синхронизация смерти
-    if (this.isPlayer && myPlayerId) {
-        socket.emit('playerDeath', { id: myPlayerId, cause });
+    createMessage(this.x, this.y - 50, T[cause] || 'УНИЧТОЖЕН', '#ef4444');
+    
+    // Синхронизация смерти с сервером (только для игрока)
+    if (this.isPlayer && socket && myPlayerId) {
+        socket.emit('playerDeath', {
+            id: myPlayerId,
+            cause: cause
+        });
     }
   }
 
@@ -1630,19 +1428,6 @@ function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math
                 if (GameState.repairBuy) { if (GameState.pp >= REPAIR) { GameState.pp -= REPAIR; GameState.kit = true; } else showMessage('Не хватает PP на ремонт'); }
                 savePP();
                 Object.keys(currentConfig.weapons).forEach(k => { const w = currentConfig.weapons[k]; if (w && (w.minMass || 0) > currentConfig.hull.mass) delete currentConfig.weapons[k]; });
-                
-                // Присоединяемся к мультиплееру
-                const sp0 = findSpawn(currentConfig.hull, null);
-                socket.emit('joinGame', {
-                    x: sp0.x,
-                    y: sp0.y,
-                    angle: 0,
-                    hull: currentConfig.hull,
-                    hp: currentConfig.hull.hp,
-                    maxHp: currentConfig.hull.hp,
-                    team: 1,
-                    config: currentConfig
-                });
             }
             if (mode === 'garage' && GameState.pp < SORTIE) { GameState.pp = SORTIE; savePP(); showMessage('Аварийный резерв: ' + SORTIE + ' PP'); }
             GameState.mode = mode;
@@ -1681,14 +1466,23 @@ function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math
                 GameState.camera.x = canvas.width / 2 - sp0.x; GameState.camera.y = canvas.height / 2 - sp0.y;
                 GameState.entities.push(playerVehicle);
                 
-                // Боты: если сервер недоступен, создаём локально
-                if (!socket) {
-                    createTarget(); createTarget();
-                    showMessage("Остров в океане. ПКМ - захват цели, колесо - зум. Одиночный режим.");
-                } else {
-                    showMessage("Остров в океане. ПКМ - захват цели, колесо - зум. Мультиплеер активен.");
+                // Отправляем данные игрока на сервер
+                if (socket && myPlayerId) {
+                    socket.emit('joinGame', {
+                        x: playerVehicle.x,
+                        y: playerVehicle.y,
+                        angle: playerVehicle.angle,
+                        hull: playerVehicle.hull,
+                        hp: playerVehicle.hp,
+                        maxHp: playerVehicle.maxHp,
+                        team: playerVehicle.team,
+                        config: currentConfig
+                    });
                 }
+                
+                createTarget(); createTarget();
                 updateHUD();
+                showMessage("Остров в океане. ПКМ - захват цели, колесо - зум.");
             }
         }
 
@@ -1766,11 +1560,19 @@ function drawGarage(ctx){
             if (dt > 0.05) dt = 0.05;
 
             // Update
+            // Добавляем удалённых игроков в entities для обновления
+            remotePlayers.forEach(v => {
+                if (!GameState.entities.includes(v)) {
+                    GameState.entities.push(v);
+                }
+            });
             GameState.entities.forEach(e => e.active && e.update(dt));
             GameState.projectiles.forEach(p => p.active && p.update(dt));
             GameState.particles.forEach(p => p.life > 0 && p.update(dt));
 
             GameState.entities = GameState.entities.filter(e => e.active);
+            // Удаляем удалённых игроков которые больше не в remotePlayers
+            GameState.entities = GameState.entities.filter(e => !e.id || e.id === myPlayerId || remotePlayers.has(e.id));
             if (GameState.mode === 'combat') collideVehicles();
             GameState.projectiles = GameState.projectiles.filter(p => p.active);
             GameState.particles = GameState.particles.filter(p => p.life > 0);
@@ -1806,10 +1608,8 @@ function drawGarage(ctx){
 
             if (GameState.mode === 'combat') drawMap2(ctx); else drawGarage(ctx);
 
-            // Рисуем всех сущностей (локальные + удалённые игроки)
-            [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp <= 0 && e.draw).forEach(e => e.draw(ctx));
-            [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp > 0 && e.draw).forEach(e => e.draw(ctx));
-            
+            GameState.entities.filter(e => e.hp <= 0).forEach(e => e.draw(ctx));
+            GameState.entities.filter(e => e.hp > 0).forEach(e => e.draw(ctx));
             GameState.particles.forEach(p => p.draw(ctx));
             GameState.projectiles.forEach(p => p.draw(ctx));
             drawLock(ctx); drawMini();
