@@ -1311,24 +1311,38 @@ class Projectile {
   hit() {
     const d = this.data;
     for (const e of GameState.entities) {
-      if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active || e.team === this.team) continue;
+      if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active) continue;
+      // В мультиплеере убираем проверку команды - можно стрелять по всем
+      if (!socket && e.team === this.team) continue;
       const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
       if (dx * dx + dy * dy > L * L) continue;
       const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
       if (Math.abs(lx) < L / 2 + 1 && Math.abs(ly) < e.hull.size.w / 2 + 1) {
-        const f = d.type === 'kinetic' ? 1 - .3 * Math.min(1, this.age * d.vel / d.range) : 1; // потеря пробития с дистанцией
+        const f = d.type === 'kinetic' ? 1 - .3 * Math.min(1, this.age * d.vel / d.range) : 1;
         const pa = this.angle;
         e.takeDamage(d.dmg * f, d.pen * f, this.x, this.y, pa);
         
-        // Если это локальный игрок и снаряд от другого игрока, синхронизируем урон
-        if (e.isPlayer && this.isRemote && socket && myPlayerId) {
-            socket.emit('hit', {
-                targetId: myPlayerId,
-                hp: e.hp,
-                mods: e.mods,
-                flood: e.flood,
-                fire: e.fire
-            });
+        // Синхронизация урона
+        if (socket && myPlayerId) {
+            if (e.isPlayer && this.isRemote) {
+                // Удалённый снаряд попал в локального игрока
+                socket.emit('hit', {
+                    targetId: myPlayerId,
+                    hp: e.hp,
+                    mods: e.mods,
+                    flood: e.flood,
+                    fire: e.fire
+                });
+            } else if (!this.isRemote && e.id && e.id !== myPlayerId) {
+                // Локальный снаряд попал в удалённого игрока
+                socket.emit('hit', {
+                    targetId: e.id,
+                    hp: e.hp,
+                    mods: e.mods,
+                    flood: e.flood,
+                    fire: e.fire
+                });
+            }
         }
         
         this.impact();
