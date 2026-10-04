@@ -717,6 +717,37 @@
                 
                 const tipX = this.worldX + Math.cos(this.angle) * this.data.length;
                 const tipY = this.worldY + Math.sin(this.angle) * this.data.length;
+                
+                // Предохранитель от самопопадания - проверяем не смотрит ли пушка на свой же корпус
+                const toCenterX = this.vehicle.x - this.worldX;
+                const toCenterY = this.vehicle.y - this.worldY;
+                const toCenterAngle = Math.atan2(toCenterY, toCenterX);
+                let angleDiff = Math.abs(this.angle - toCenterAngle);
+                angleDiff = Math.abs(Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff))); // Normalize
+                
+                // Если пушка смотрит в сторону своего корпуса (в пределах 45 градусов), не стреляем
+                if (angleDiff < Math.PI / 4) {
+                    return;
+                }
+                
+                // Также проверяем что пушка не смотрит на другие части того же vehicle
+                for (const otherMount of this.vehicle.hull.mounts) {
+                    if (otherMount.id === this.mount.id) continue;
+                    const cosA = Math.cos(this.vehicle.angle);
+                    const sinA = Math.sin(this.vehicle.angle);
+                    const otherWorldX = this.vehicle.x + (-otherMount.y * cosA - otherMount.x * sinA);
+                    const otherWorldY = this.vehicle.y + (-otherMount.y * sinA + otherMount.x * cosA);
+                    
+                    const toOtherX = otherWorldX - this.worldX;
+                    const toOtherY = otherWorldY - this.worldY;
+                    const toOtherAngle = Math.atan2(toOtherY, toOtherX);
+                    let otherAngleDiff = Math.abs(this.angle - toOtherAngle);
+                    otherAngleDiff = Math.abs(Math.atan2(Math.sin(otherAngleDiff), Math.cos(otherAngleDiff)));
+                    
+                    if (otherAngleDiff < Math.PI / 6) {
+                        return;
+                    }
+                }
 
                 // Dual barrel offset
                 if (this.data.dual) {
