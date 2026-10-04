@@ -290,7 +290,6 @@
         // Socket.io подключение (минимальное вмешательство)
         let socket = null;
         let myPlayerId = null;
-        let isHost = false; // Является ли этот игрок хостом
         const remotePlayers = new Map();
 
         if (typeof io !== 'undefined') {
@@ -309,31 +308,25 @@
                     playerVehicle.id = myPlayerId;
                 }
             });
-            socket.on('setHost', (data) => {
-                isHost = data.isHost;
-                console.log('Хост статус:', isHost);
-                if (isHost) {
-                    showMessage('Вы хост - создаёте ботов');
-                }
-            });
             socket.on('newPlayer', (playerData) => {
                 if (playerData.id !== myPlayerId) {
-                    // Создаём удалённого игрока как обычный Vehicle
-                    const remoteVehicle = new Vehicle(playerData.x, playerData.y, playerData.config, false, playerData.team);
-                    remoteVehicle.id = playerData.id;
-                    remoteVehicle.hp = playerData.hp;
-                    remoteVehicle.maxHp = playerData.maxHp;
-                    remoteVehicle.angle = playerData.angle;
-                    remoteVehicle.isRemote = true; // Помечаем как удалённого игрока
-                    remotePlayers.set(playerData.id, remoteVehicle);
-                    console.log('Игрок присоединился:', playerData.id);
+                    // Проверяем что игрока ещё нет
+                    if (!remotePlayers.has(playerData.id)) {
+                        const remoteVehicle = new Vehicle(playerData.x, playerData.y, playerData.config, false, playerData.team);
+                        remoteVehicle.id = playerData.id;
+                        remoteVehicle.hp = playerData.hp;
+                        remoteVehicle.maxHp = playerData.maxHp;
+                        remoteVehicle.angle = playerData.angle;
+                        remoteVehicle.isRemote = true;
+                        remotePlayers.set(playerData.id, remoteVehicle);
+                        console.log('Игрок присоединился:', playerData.id);
+                    }
                 }
             });
             socket.on('playersList', (players) => {
                 console.log('Получен список игроков:', players.length);
                 players.forEach(playerData => {
-                    if (playerData.id !== myPlayerId) {
-                        // Создаём уже существующих игроков
+                    if (playerData.id !== myPlayerId && !remotePlayers.has(playerData.id)) {
                         const remoteVehicle = new Vehicle(playerData.x, playerData.y, playerData.config, false, playerData.team);
                         remoteVehicle.id = playerData.id;
                         remoteVehicle.hp = playerData.hp;
@@ -385,30 +378,7 @@
                 }
             });
             socket.on('botsUpdate', (botsData) => {
-                if (!isHost) {
-                    // Только не-хосты получают ботов от хоста
-                    botsData.forEach(bot => {
-                        if (!remotePlayers.has(bot.id)) {
-                            // Создаём бота как обычный Vehicle
-                            const botVehicle = new Vehicle(bot.x, bot.y, bot.config, false, bot.team);
-                            botVehicle.id = bot.id;
-                            botVehicle.hp = bot.hp;
-                            botVehicle.maxHp = bot.maxHp;
-                            botVehicle.angle = bot.angle;
-                            botVehicle.isRemote = false; // Боты управляются AI
-                            remotePlayers.set(bot.id, botVehicle);
-                        } else {
-                            const existingBot = remotePlayers.get(bot.id);
-                            existingBot.x = bot.x;
-                            existingBot.y = bot.y;
-                            existingBot.angle = bot.angle;
-                            existingBot.vx = bot.vx;
-                            existingBot.vy = bot.vy;
-                            existingBot.hp = bot.hp;
-                            existingBot.active = bot.active;
-                        }
-                    });
-                }
+                // Боты убраны - игнорируем
             });
         }
 
@@ -1560,14 +1530,7 @@ function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math
                     });
                 }
                 
-                // Боты создаются локально у хоста
-                if (isHost) {
-                    createTarget(); createTarget();
-                } else if (!socket) {
-                    // Если нет сервера, создаём боты локально
-                    createTarget(); createTarget();
-                }
-                
+                // Боты убраны
                 updateHUD();
                 showMessage("Остров в океане. ПКМ - захват цели, колесо - зум.");
             }
@@ -1668,27 +1631,6 @@ function drawGarage(ctx){
             if (GameState.mode === 'combat') collideVehicles();
             GameState.projectiles = GameState.projectiles.filter(p => p.active);
             GameState.particles = GameState.particles.filter(p => p.life > 0);
-
-            // Хост синхронизирует ботов с сервером
-            if (isHost && socket && GameState.mode === 'combat') {
-                const botsData = GameState.entities
-                    .filter(e => !e.isPlayer && !e.isRemote && e.id && e.id.startsWith('local_'))
-                    .map(bot => ({
-                        id: bot.id,
-                        x: bot.x,
-                        y: bot.y,
-                        angle: bot.angle,
-                        vx: bot.vx,
-                        vy: bot.vy,
-                        hull: bot.hull,
-                        hp: bot.hp,
-                        maxHp: bot.maxHp,
-                        team: bot.team,
-                        config: bot.config,
-                        active: bot.active
-                    }));
-                socket.emit('botsUpdate', botsData);
-            }
 
             // Camera follow player
             if (GameState.mode === 'combat' && playerVehicle) {
