@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D War Strategy - Multiplayer</title>
+    <title>2D War Strategy - Deep Customization</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
@@ -237,74 +237,9 @@
             80% { opacity: 1; transform: translateY(0); }
             100% { opacity: 0; transform: translateY(-20px); }
         }
-
-        #lobby {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #1c1917 0%, #292524 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 100;
-        }
-
-        #lobby.hidden { display: none; }
-
-        .lobby-content {
-            background-color: #292524;
-            border: 2px solid #fbbf24;
-            padding: 40px;
-            border-radius: 12px;
-            text-align: center;
-            box-shadow: 0 0 50px rgba(251, 191, 36, 0.3);
-        }
-
-        .lobby-content h1 {
-            color: #fbbf24;
-            font-size: 2.5rem;
-            margin-bottom: 20px;
-            text-transform: uppercase;
-        }
-
-        .lobby-content button {
-            margin-top: 20px;
-            padding: 15px 40px;
-            font-size: 1.2rem;
-        }
-
-        #player-list {
-            margin-top: 20px;
-            text-align: left;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .player-item {
-            padding: 8px 12px;
-            margin: 4px 0;
-            background-color: #1c1917;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-        }
     </style>
 </head>
 <body>
-
-    <div id="lobby">
-        <div class="lobby-content">
-            <h1>2D War Strategy</h1>
-            <p style="color: #a8a29e; margin-bottom: 20px;">Многопользовательский режим</p>
-            <div id="player-list">
-                <p style="color: #78716c;">Ожидание игроков...</p>
-            </div>
-            <button id="btn-join">Присоединиться к игре</button>
-        </div>
-    </div>
 
     <div id="game-container">
         <div id="ui-panel">
@@ -328,7 +263,7 @@
         </div>
 
         <div id="game-view">
-            <div id="mode-indicator">Режим: Лобби</div>
+            <div id="mode-indicator">Режим: Ангар (Настройка)</div>
             
             <div id="hud">
                 <div class="hud-panel">
@@ -341,7 +276,7 @@
                     <strong style="color:#f5f5f4;">Управление:</strong><br>
                     W,A,S,D - Движение<br>
                     Мышь - Прицеливание (все башни)<br>
-                    ЛКМ - Залп из всех орудий<br>ПКМ - Захват цели (враг / точка)<br>X - Сброс цели<br>Колесо мыши, +/- - Зум
+                    ЛКМ - Залп из всех орудий<br>ПКМ - Захват цели (враг / точка)<br>X - Сброс цели<br>Колесо мыши, +/- - Зум<br>R - ремонт (если куплен)
                 </div>
             </div>
 
@@ -357,6 +292,182 @@
         let myPlayerId = null;
         const remotePlayers = new Map();
         const remoteProjectiles = new Map();
+
+        // Socket.io event handlers
+        socket.on('playerJoined', (data) => {
+            myPlayerId = data.id;
+            console.log('Мой ID:', myPlayerId);
+        });
+
+        socket.on('playersList', (players) => {
+            players.forEach(p => {
+                if (p.id !== myPlayerId) {
+                    remotePlayers.set(p.id, createRemoteVehicle(p));
+                }
+            });
+        });
+
+        socket.on('newPlayer', (playerData) => {
+            if (playerData.id !== myPlayerId) {
+                remotePlayers.set(playerData.id, createRemoteVehicle(playerData));
+                showMessage('Игрок присоединился!');
+            }
+        });
+
+        socket.on('playerMoved', (data) => {
+            const remotePlayer = remotePlayers.get(data.id);
+            if (remotePlayer) {
+                remotePlayer.x = data.x;
+                remotePlayer.y = data.y;
+                remotePlayer.angle = data.angle;
+                remotePlayer.vx = data.vx;
+                remotePlayer.vy = data.vy;
+            }
+        });
+
+        socket.on('projectileFired', (data) => {
+            if (data.playerId !== myPlayerId) {
+                const proj = new RemoteProjectile(data);
+                remoteProjectiles.set(data.id, proj);
+                GameState.projectiles.push(proj);
+            }
+        });
+
+        socket.on('playerHit', (data) => {
+            const remotePlayer = remotePlayers.get(data.targetId);
+            if (remotePlayer) {
+                remotePlayer.hp = data.hp;
+                remotePlayer.mods = data.mods;
+                remotePlayer.flood = data.flood;
+                remotePlayer.fire = data.fire;
+            }
+        });
+
+        socket.on('playerDied', (data) => {
+            const remotePlayer = remotePlayers.get(data.id);
+            if (remotePlayer) {
+                remotePlayer.hp = 0;
+                remotePlayer.dead = data.cause;
+                remotePlayer.active = false;
+            }
+        });
+
+        socket.on('playerRespawned', (data) => {
+            const remotePlayer = remotePlayers.get(data.id);
+            if (remotePlayer) {
+                remotePlayer.x = data.x;
+                remotePlayer.y = data.y;
+                remotePlayer.angle = data.angle;
+                remotePlayer.hp = data.hp;
+                remotePlayer.maxHp = data.maxHp;
+                remotePlayer.active = true;
+                remotePlayer.dead = null;
+            }
+        });
+
+        socket.on('playerRemoved', (data) => {
+            remotePlayers.delete(data.id);
+        });
+
+        function createRemoteVehicle(data) {
+            const vehicle = {
+                id: data.id,
+                x: data.x,
+                y: data.y,
+                angle: data.angle,
+                vx: data.vx,
+                vy: data.vy,
+                hull: data.hull,
+                hp: data.hp,
+                maxHp: data.maxHp,
+                team: data.team,
+                config: data.config,
+                weaponSystems: [],
+                active: data.active,
+                dead: null,
+                flood: 0,
+                fire: false,
+                mods: { engine: 1, tracks: 1, crew: 1 },
+                isRemote: true,
+                isPlayer: false
+            };
+            // Создаём weapon systems для удалённого игрока
+            if (data.config && data.config.hull && data.config.hull.mounts) {
+                data.config.hull.mounts.forEach(m => {
+                    const w = data.config.weapons[m.id];
+                    if (w) vehicle.weaponSystems.push(new WeaponSystem(m, w, vehicle));
+                });
+            }
+            return vehicle;
+        }
+
+        class RemoteProjectile {
+            constructor(data) {
+                this.x = data.x;
+                this.y = data.y;
+                this.angle = data.angle;
+                this.data = data.weaponData;
+                this.team = data.team;
+                this.active = true;
+                this.age = 0;
+                this.life = this.data.range / this.data.vel + 0.2;
+                this.trail = [];
+                this.v = this.data.vel;
+                this.vx = Math.cos(this.angle) * this.v;
+                this.vy = Math.sin(this.angle) * this.v;
+            }
+
+            update(dt) {
+                this.age += dt;
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.trail.push({x: this.x, y: this.y});
+                if (this.trail.length > 14) this.trail.shift();
+                this.life -= dt;
+                if (this.life <= 0) this.active = false;
+
+                // Проверка попадания в локальных сущностей
+                for (const e of GameState.entities) {
+                    if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active || e.team === this.team) continue;
+                    const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
+                    if (dx * dx + dy * dy > L * L) continue;
+                    const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
+                    if (Math.abs(lx) < L / 2 + 1 && Math.abs(ly) < e.hull.size.w / 2 + 1) {
+                        e.takeDamage(this.data.dmg, this.data.pen, this.x, this.y, this.angle);
+                        this.blast();
+                        this.active = false;
+                        return true;
+                    }
+                }
+            }
+
+            blast() {
+                const d = this.data;
+                createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
+            }
+
+            draw(ctx) {
+                const d = this.data;
+                if (this.trail.length > 1) {
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.beginPath();
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    ctx.strokeStyle = d.color;
+                    ctx.globalAlpha = 0.6;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = '#fff3b0';
+                ctx.fillRect(0, -1.2, 14, 2.4);
+                ctx.restore();
+            }
+        }
 
         // Size ratings: 1 = Light, 2 = Medium, 3 = Heavy
         const DB = {
@@ -425,7 +536,7 @@
         };
 
         const GameState = {
-            mode: 'lobby',
+            mode: 'garage',
             keys: {},
             mouse: { x: 0, y: 0, down: false, worldX: 0, worldY: 0 },
             camera: { x: 0, y: 0, zoom: 1 },
@@ -433,207 +544,18 @@
             particles: [],
             projectiles: [],
             lastTime: 0,
-            activeSlot: null
+            activeSlot: null // For UI
         };
 
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let playerVehicle = null;
 
-        // Socket.io event handlers
-        socket.on('playerJoined', (data) => {
-            myPlayerId = data.id;
-            console.log('Мой ID:', myPlayerId);
-            updatePlayerList();
-        });
-
-        socket.on('playersList', (players) => {
-            players.forEach(p => {
-                if (p.id !== myPlayerId) {
-                    remotePlayers.set(p.id, createRemoteVehicle(p));
-                }
-            });
-            updatePlayerList();
-        });
-
-        socket.on('newPlayer', (playerData) => {
-            if (playerData.id !== myPlayerId) {
-                remotePlayers.set(playerData.id, createRemoteVehicle(playerData));
-                showMessage('Игрок присоединился!');
-            }
-            updatePlayerList();
-        });
-
-        socket.on('playerMoved', (data) => {
-            const remotePlayer = remotePlayers.get(data.id);
-            if (remotePlayer) {
-                remotePlayer.x = data.x;
-                remotePlayer.y = data.y;
-                remotePlayer.angle = data.angle;
-                remotePlayer.vx = data.vx;
-                remotePlayer.vy = data.vy;
-            }
-        });
-
-        socket.on('weaponSync', (data) => {
-            const remotePlayer = remotePlayers.get(data.playerId);
-            if (remotePlayer) {
-                remotePlayer.weaponSystems = data.weapons;
-            }
-        });
-
-        socket.on('projectileFired', (data) => {
-            if (data.playerId !== myPlayerId) {
-                const proj = new RemoteProjectile(data);
-                remoteProjectiles.set(data.id, proj);
-                GameState.projectiles.push(proj);
-            }
-        });
-
-        socket.on('playerHit', (data) => {
-            const remotePlayer = remotePlayers.get(data.targetId);
-            if (remotePlayer) {
-                remotePlayer.hp = data.hp;
-                remotePlayer.mods = data.mods;
-                remotePlayer.flood = data.flood;
-                remotePlayer.fire = data.fire;
-            }
-        });
-
-        socket.on('playerDied', (data) => {
-            const remotePlayer = remotePlayers.get(data.id);
-            if (remotePlayer) {
-                remotePlayer.hp = 0;
-                remotePlayer.dead = data.cause;
-                remotePlayer.active = false;
-            }
-        });
-
-        socket.on('playerRespawned', (data) => {
-            const remotePlayer = remotePlayers.get(data.id);
-            if (remotePlayer) {
-                remotePlayer.x = data.x;
-                remotePlayer.y = data.y;
-                remotePlayer.angle = data.angle;
-                remotePlayer.hp = data.hp;
-                remotePlayer.maxHp = data.maxHp;
-                remotePlayer.active = true;
-                remotePlayer.dead = null;
-            }
-        });
-
-        socket.on('playerRemoved', (data) => {
-            remotePlayers.delete(data.id);
-            updatePlayerList();
-        });
-
-        function createRemoteVehicle(data) {
-            const vehicle = {
-                id: data.id,
-                x: data.x,
-                y: data.y,
-                angle: data.angle,
-                vx: data.vx,
-                vy: data.vy,
-                hull: data.hull,
-                hp: data.hp,
-                maxHp: data.maxHp,
-                team: data.team,
-                config: data.config,
-                weaponSystems: [],
-                active: data.active,
-                dead: null,
-                flood: 0,
-                fire: false,
-                mods: { engine: 1, tracks: 1, crew: 1 },
-                isRemote: true
-            };
-            return vehicle;
-        }
-
-        class RemoteProjectile {
-            constructor(data) {
-                this.x = data.x;
-                this.y = data.y;
-                this.angle = data.angle;
-                this.data = data.data;
-                this.team = data.team;
-                this.active = true;
-                this.age = 0;
-                this.life = this.data.range / this.data.vel + 0.2;
-                this.trail = [];
-                this.v = this.data.vel;
-                this.vx = Math.cos(this.angle) * this.v;
-                this.vy = Math.sin(this.angle) * this.v;
-            }
-
-            update(dt) {
-                this.age += dt;
-                this.x += this.vx * dt;
-                this.y += this.vy * dt;
-                this.trail.push({x: this.x, y: this.y});
-                if (this.trail.length > 14) this.trail.shift();
-                this.life -= dt;
-                if (this.life <= 0) this.active = false;
-            }
-
-            draw(ctx) {
-                const d = this.data;
-                if (this.trail.length > 1) {
-                    ctx.globalCompositeOperation = 'lighter';
-                    ctx.beginPath();
-                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
-                    for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
-                    ctx.strokeStyle = d.color;
-                    ctx.globalAlpha = 0.6;
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                    ctx.globalAlpha = 1;
-                    ctx.globalCompositeOperation = 'source-over';
-                }
-                ctx.save();
-                ctx.translate(this.x, this.y);
-                ctx.rotate(this.angle);
-                ctx.fillStyle = '#fff3b0';
-                ctx.fillRect(0, -1.2, 14, 2.4);
-                ctx.restore();
-            }
-        }
-
-        function updatePlayerList() {
-            const list = document.getElementById('player-list');
-            if (myPlayerId) {
-                let html = `<div class="player-item"><span style="color:#fbbf24">Вы (ID: ${myPlayerId.substr(0,4)})</span><span>В игре</span></div>`;
-                remotePlayers.forEach((p, id) => {
-                    html += `<div class="player-item"><span>Игрок ${id.substr(0,4)}</span><span>${p.active ? 'В игре' : 'Мёртв'}</span></div>`;
-                });
-                list.innerHTML = html;
-            }
-        }
-
-        document.getElementById('btn-join').addEventListener('click', () => {
-            document.getElementById('lobby').classList.add('hidden');
-            
-            // Присоединяемся к игре
-            const sp0 = findSpawn(currentConfig.hull, null);
-            socket.emit('joinGame', {
-                x: sp0.x,
-                y: sp0.y,
-                angle: 0,
-                hull: currentConfig.hull,
-                hp: currentConfig.hull.hp,
-                maxHp: currentConfig.hull.hp,
-                team: 1,
-                config: currentConfig
-            });
-            
-            switchMode('combat');
-        });
-
         function renderUI() {
             const container = document.getElementById('builder-content');
             container.innerHTML = '';
 
+            // Helper to create slots
             const createSlot = (id, title, selectedItem, itemsList, type, maxAllowedSize = 3) => {
                 const div = document.createElement('div');
                 div.className = 'slot-container';
@@ -652,6 +574,7 @@
                 body.className = `slot-body ${isOpen ? 'open' : ''}`;
 
                 itemsList.forEach(item => {
+                    // Filter weapons by mount size
                     if (type === 'weapon' && item.size > maxAllowedSize || (item.minMass || 0) > currentConfig.hull.mass) return;
 
                     const isSelected = selectedItem && selectedItem.id === item.id;
@@ -664,6 +587,8 @@
                         statsHtml += `<div class="stat-item">Среда: <span>${item.terrain === 'water' ? 'Вода' : (item.terrain === 'land' ? 'Суша' : 'Амфибия')}</span></div>`;
                         statsHtml += `<div class="stat-item">Слотов: <span>${item.mounts.length}</span></div>`;
                     }
+                    statsHtml += `<div class="stat-item">Цена: <span>${item.cost} PP${GameState.owned.has(item.id) ? ' ✓ куплено' : ''}</span></div>`;
+                    if(type === 'armor') statsHtml += `<div class="stat-item">Броня: <span>+${item.add}</span></div><div class="stat-item">Масса: <span>${armorMass(item, currentConfig.hull)}кг</span></div>${item.era ? '<div class="stat-item">Заряды: <span>' + item.era + '</span></div>' : ''}`;
                     if(type === 'engine') statsHtml += `<div class="stat-item">Мощность: <span>${(item.power/1000).toFixed(0)}к</span></div>`;
                     if(type === 'weapon') {
                         statsHtml += `<div class="stat-item">Урон: <span>${item.dmg}</span></div>`;
@@ -684,13 +609,14 @@
                     body.appendChild(card);
                 });
                 
-                if(type === 'weapon') {
+                // Add "Remove" button for optional slots
+                if(type === 'weapon' || type === 'armor') {
                     const removeBtn = document.createElement('button');
                     removeBtn.className = 'secondary';
                     removeBtn.style.width = '100%';
                     removeBtn.style.padding = '5px';
                     removeBtn.style.marginTop = '10px';
-                    removeBtn.innerText = 'Снять вооружение';
+                    removeBtn.innerText = type === 'armor' ? 'Снять броню' : 'Снять вооружение';
                     removeBtn.onclick = () => selectComponent(type, null, id);
                     body.appendChild(removeBtn);
                 }
@@ -699,21 +625,34 @@
                 container.appendChild(div);
             };
 
+            // 1. Chassis Slot
             createSlot('slot_hull', 'ШАССИ / КОРПУС', currentConfig.hull, DB.hulls, 'hull');
+            
+            // 2. Engine Slot
             createSlot('slot_engine', 'ДВИГАТЕЛЬ', currentConfig.engine, DB.engines, 'engine');
             
+            // 3. Weapon Slots (Dynamic based on hull)
             currentConfig.hull.mounts.forEach(mount => {
                 const sizeLabels = ['Легкий', 'Средний', 'Тяжелый'];
                 const title = `СЛОТ: ${mount.name} (${sizeLabels[mount.size-1]})`;
                 createSlot(`slot_w_${mount.id}`, title, currentConfig.weapons[mount.id], DB.weapons, 'weapon', mount.size);
             });
 
+            Object.keys(ZN).forEach(z => createSlot('slot_a_' + z, 'БРОНЯ: ' + ZN[z], currentConfig.armor[z], ARM, 'armor'));
             updateStats();
         }
 
         function selectComponent(type, item, slotId) {
+            if (GameState.mode !== 'garage') return;
+            if (item && !GameState.owned.has(item.id)) {
+                if (GameState.pp < item.cost) { showMessage('Не хватает PP: нужно ' + item.cost); return; }
+                shopDialog(item, () => { GameState.pp -= item.cost; GameState.owned.add(item.id); savePP(); selectComponent(type, item, slotId); });
+                return;
+            }
+
             if (type === 'hull') {
                 currentConfig.hull = item;
+                // Clear incompatible weapons
                 const newWeapons = {};
                 item.mounts.forEach(m => {
                     const oldWep = currentConfig.weapons[m.id];
@@ -722,11 +661,15 @@
                     }
                 });
                 currentConfig.weapons = newWeapons;
-                GameState.activeSlot = null;
+                GameState.activeSlot = null; // close tabs
             } 
             else if (type === 'engine') {
                 currentConfig.engine = item;
             } 
+            else if (type === 'armor') {
+                const z = slotId.replace('slot_a_', '');
+                if (item === null) delete currentConfig.armor[z]; else currentConfig.armor[z] = item;
+            }
             else if (type === 'weapon') {
                 const mountId = slotId.replace('slot_w_', '');
                 if (item === null) {
@@ -741,11 +684,13 @@
         }
 
         function updateStats() {
+            refreshPP();
             let totalMass = currentConfig.hull.mass + currentConfig.engine.mass;
-            Object.values(currentConfig.weapons).forEach(w => totalMass += w.mass);
+            Object.values(currentConfig.armor).forEach(a => totalMass += armorMass(a, currentConfig.hull));
             let firePower = 0;
             
             Object.values(currentConfig.weapons).forEach(w => {
+                totalMass += w.mass;
                 let dps = w.dmg / (w.burst ? w.burstReload : w.reload);
                 if(w.burst) dps *= w.burst;
                 firePower += dps;
@@ -787,41 +732,52 @@
                 this.mount = mountInfo;
                 this.data = weaponData;
                 this.vehicle = vehicle;
-                this.angle = 0;
+                
+                this.angle = 0; // Relative to world
                 this.reloadTimer = 0;
+                
+                // Burst logic
                 this.burstShotsLeft = 0;
                 this.burstIntervalTimer = 0;
+                
                 this.recoil = 0;
             }
 
             update(dt, targetX, targetY, isTriggerPulled) {
                 if (!this.data) return;
 
+                // Recover recoil
                 if(this.recoil > 0) this.recoil -= dt * 30;
                 if(this.recoil < 0) this.recoil = 0;
 
+                // Calculate absolute position of this mount
                 const cosA = Math.cos(this.vehicle.angle);
                 const sinA = Math.sin(this.vehicle.angle);
+                // Rotate local mount offset to world
                 this.worldX = this.vehicle.x + (-this.mount.y * cosA - this.mount.x * sinA);
                 this.worldY = this.vehicle.y + (-this.mount.y * sinA + this.mount.x * cosA);
 
+                // Aiming
                 const dx = targetX - this.worldX;
                 const dy = targetY - this.worldY;
                 const targetAngle = Math.atan2(dy, dx);
 
                 let diff = targetAngle - this.angle;
-                diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+                diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // Normalize
                 
                 const maxTurn = this.data.turn * dt * 5; 
                 if (Math.abs(diff) < maxTurn) this.angle = targetAngle;
                 else this.angle += Math.sign(diff) * maxTurn;
 
+                // Reloading
                 if (this.reloadTimer > 0) this.reloadTimer -= dt * Math.max(.2, this.vehicle.mods.crew);
                 if (this.burstIntervalTimer > 0) this.burstIntervalTimer -= dt;
 
-                const aimed = Math.abs(diff) < 0.1;
+                // Firing logic
+                const aimed = (this.data.type === 'ballistic' || Math.abs(diff) < 0.1) && (this.vehicle.isPlayer || Math.hypot(dx, dy) < this.data.range);
                 
                 if (this.data.burst) {
+                    // Burst mode
                     if (isTriggerPulled && aimed && this.reloadTimer <= 0 && this.burstShotsLeft === 0) {
                         this.burstShotsLeft = this.data.burst;
                     }
@@ -829,12 +785,13 @@
                         this.fireProjectile();
                         this.burstShotsLeft--;
                         if (this.burstShotsLeft > 0) {
-                            this.burstIntervalTimer = this.data.reload;
+                            this.burstIntervalTimer = this.data.reload; // Time between shots in burst
                         } else {
-                            this.reloadTimer = this.data.burstReload;
+                            this.reloadTimer = this.data.burstReload; // Time to reload full mag
                         }
                     }
                 } else {
+                    // Single shot
                     if (isTriggerPulled && aimed && this.reloadTimer <= 0) {
                         this.fireProjectile();
                         this.reloadTimer = this.data.reload;
@@ -843,21 +800,22 @@
             }
 
             fireProjectile() {
-                this.recoil = this.data.barrelW;
+                this.recoil = this.data.barrelW; // visual pushback
                 
                 const tipX = this.worldX + Math.cos(this.angle) * this.data.length;
                 const tipY = this.worldY + Math.sin(this.angle) * this.data.length;
 
+                // Dual barrel offset
                 if (this.data.dual) {
                     const perpX = Math.cos(this.angle + Math.PI/2) * 4;
                     const perpY = Math.sin(this.angle + Math.PI/2) * 4;
-                    const side = (this.burstShotsLeft % 2 === 0) ? 1 : -1;
+                    const side = (this.burstShotsLeft % 2 === 0) ? 1 : -1; // alternate barrels
                     
                     GameState.projectiles.push(new Projectile(
                         tipX + perpX*side, tipY + perpY*side, this.angle, this.data, this.vehicle.team, this.vehicle
                     ));
                     createExplosion(tipX + perpX*side, tipY + perpY*side, 15, '#fbbf24', 5);
-                    
+
                     // Синхронизация выстрела
                     if (this.vehicle.isPlayer && myPlayerId) {
                         socket.emit('fire', {
@@ -874,7 +832,7 @@
                         tipX, tipY, this.angle, this.data, this.vehicle.team, this.vehicle
                     ));
                     createExplosion(tipX, tipY, 10, '#fbbf24', 5);
-                    
+
                     // Синхронизация выстрела
                     if (this.vehicle.isPlayer && myPlayerId) {
                         socket.emit('fire', {
@@ -888,6 +846,7 @@
                     }
                 }
 
+                // Physics pushback on hull
                 const impulse = this.data.dmg * this.data.vel * 0.00002 / (this.vehicle.mass / 10000);
                 this.vehicle.vx -= Math.cos(this.angle) * impulse;
                 this.vehicle.vy -= Math.sin(this.angle) * impulse;
@@ -915,7 +874,7 @@
                     const g = ctx.createRadialGradient(-R * .3, -R * .3, 1, 0, 0, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(0,0,0,.25)');
                     ctx.fillStyle = g; ctx.fill();
                     ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(-R * .25, R * .3, R * .22, 0, 6.3); ctx.fill();
-                    if (!dead && rc > w * .5) {
+                    if (!dead && rc > w * .5) { // вспышка выстрела
                         const fx = R + len + 4, fg = ctx.createRadialGradient(fx, 0, 0, fx, 0, 10 + w * 2);
                         fg.addColorStop(0, 'rgba(255,255,220,.95)'); fg.addColorStop(1, 'rgba(255,140,30,0)');
                         ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(fx, 0, 10 + w * 2, 0, 6.3); ctx.fill();
@@ -925,300 +884,575 @@
             }
         }
 
-        const ZN = {front:'Лоб', side:'Борт', rear:'Корма', top:'Крыша'};
-        const ARM = [
-          {id:'a_steel', name:'Стальные накладки', add:40, mk:600, icon:'▦', desc:'Доп. плиты: +40 к броне зоны.'},
-          {id:'a_comp', name:'Композитная броня', add:110, mk:1400, icon:'▩', desc:'Тяжёлая, но держит и пушки: +110 к броне зоны.'},
-          {id:'a_era', name:'Динамическая защита (ДЗ)', add:15, mk:900, era:3, icon:'✸', desc:'Гасит первые 3 крупных попадания в зону.'}
-        ];
-        function armorMass(a, h) { return Math.round(a.mk * h.size.l * h.size.w / 1000 * .5 / 10) * 10; }
+/* ===== Броня, цели, зум ===== */
+const ZN = {front:'Лоб', side:'Борт', rear:'Корма', top:'Крыша'};
+const ARM = [
+  {id:'a_steel', name:'Стальные накладки', add:40, mk:600, icon:'▦', desc:'Доп. плиты: +40 к броне зоны.'},
+  {id:'a_comp', name:'Композитная броня', add:110, mk:1400, icon:'▩', desc:'Тяжёлая, но держит и пушки: +110 к броне зоны.'},
+  {id:'a_era', name:'Динамическая защита (ДЗ)', add:15, mk:900, era:3, icon:'✸', desc:'Гасит первые 3 крупных попадания в зону.'}
+];
+function armorMass(a, h) { return Math.round(a.mk * h.size.l * h.size.w / 1000 * .5 / 10) * 10; }
+DB.weapons.push(
+  {id:'w_bm_light', name:'Ракета "Копьё" (навесная)', size:1, type:'ballistic', mass:400, dmg:230, pen:320, radius:75, reload:9, vel:700, range:2400, turn:9, icon:'🎯', desc:'Взлетает вверх и пикирует на цель. ПКМ - выбор цели.', color:'#38bdf8', length:10, barrelW:7, isBox:true},
+  {id:'w_bm_mid', name:'Баллистическая "Молот"', size:2, type:'ballistic', mass:2500, dmg:550, pen:500, radius:110, reload:12, vel:800, range:3200, turn:9, icon:'🎯', desc:'Удар сверху по площади.', color:'#38bdf8', length:10, barrelW:10, isBox:true},
+  {id:'w_bm_heavy', name:'Баллистическая "Гром"', size:3, type:'ballistic', mass:9000, dmg:1300, pen:900, radius:170, reload:18, vel:900, range:4200, turn:9, icon:'🎯', desc:'Мощный удар сверху, большой радиус.', color:'#38bdf8', length:10, barrelW:14, isBox:true});
 
-        const WS = 4200, TC = 16, TN = Math.ceil(2 * WS / TC), IR = 2500, TS = 44, FALLEN = new Set();
-        let HG, FG, TCV;
-        const lerp = (a, b, k) => a + (b - a) * k, sm = (a, b, x) => { x = Math.max(0, Math.min(1, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
-        function hash2(x, y) { let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
-        function vnoise(x, y) { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
-          return (hash2(ix, iy) * (1 - u) + hash2(ix + 1, iy) * u) * (1 - v) + (hash2(ix, iy + 1) * (1 - u) + hash2(ix + 1, iy + 1) * u) * v; }
-        function fbm(x, y, o) { let s = 0, a = .5, f = 1; for (let i = 0; i < o; i++) { s += a * vnoise(x * f, y * f); f *= 2; a *= .5; } return s; }
-        function terrainH(x, y) {
-          const d = Math.hypot(x, y) / IR, base = 1 - d * d, w = Math.max(0, Math.min(1, (1.06 - d) / .3));
-          return base + (fbm(x / 650 + 11.3, y / 650 + 4.1, 4) - .5) * 1.1 * w;
-        }
-        function buildTerrain() {
-          HG = new Float32Array(TN * TN); FG = new Float32Array(TN * TN);
-          for (let j = 0; j < TN; j++) for (let i = 0; i < TN; i++) { const x = -WS + i * TC + TC / 2, y = -WS + j * TC + TC / 2, h = terrainH(x, y); HG[j * TN + i] = h;
-            FG[j * TN + i] = h > .05 ? sm(.46, .62, fbm(x / 450 + 50, y / 450 + 70, 3)) * (1 - sm(.6, .85, h)) * sm(.04, .12, h) : 0; }
-          TCV = document.createElement('canvas'); TCV.width = TCV.height = TN; const g = TCV.getContext('2d'), im = g.createImageData(TN, TN), D = im.data, N = TN * TN;
-          for (let k = 0; k < N; k++) {
-            const h = HG[k], hx = HG[Math.min(k + 1, N - 1)] - HG[Math.max(k - 1, 0)], hy = HG[Math.min(k + TN, N - 1)] - HG[Math.max(k - TN, 0)]; let r, c, b;
-            if (h <= 0) { const d = Math.min(1, -h / .45); r = lerp(70, 6, d); c = lerp(190, 32, d); b = lerp(200, 72, d);
-              if (h > -.012) { const f = .6 * (1 + h / .012); r = lerp(r, 255, f); c = lerp(c, 255, f); b = lerp(b, 255, f); } }
-            else if (h < .035) { r = 196; c = 172; b = 112; }
-            else { const e = sm(.03, .9, h); r = lerp(88, 150, e); c = lerp(130, 140, e); b = lerp(52, 120, e);
-              if (h > .8) { const s = sm(.8, 1, h); r = lerp(r, 235, s); c = lerp(c, 235, s); b = lerp(b, 240, s); }
-              const f = FG[k] * .55; r = lerp(r, 26, f); c = lerp(c, 62, f); b = lerp(b, 28, f); }
-            const sh = 1 + (hx + hy) * (h > 0 ? 9 : 1.2), cl = v => Math.max(0, Math.min(255, v * sh));
-            D[k * 4] = cl(r); D[k * 4 + 1] = cl(c); D[k * 4 + 2] = cl(b); D[k * 4 + 3] = 255;
-          }
-          g.putImageData(im, 0, 0);
-        }
-        function hAt(x, y) { const gx = (x + WS) / TC - .5, gy = (y + WS) / TC - .5; if (gx < 0 || gy < 0 || gx >= TN - 1 || gy >= TN - 1) return -1;
-          const i = gx | 0, j = gy | 0, fx = gx - i, fy = gy - j, k = j * TN + i;
-          return (HG[k] * (1 - fx) + HG[k + 1] * fx) * (1 - fy) + (HG[k + TN] * (1 - fx) + HG[k + TN + 1] * fx) * fy; }
-        function fdAt(x, y) { const i = Math.floor((x + WS) / TC), j = Math.floor((y + WS) / TC); return (i < 0 || j < 0 || i >= TN || j >= TN) ? 0 : FG[j * TN + i]; }
-        function envAt(x, y) { const h = hAt(x, y); return h > 0 ? 0 : (h > -.1 ? 1 : 2); }
-        function findSpawn(hull, near, rmin, rmax) {
-          if (!near) { if (hull.terrain === 'water') { rmin = IR * 1.12; rmax = IR * 1.3; } else { rmin = 0; rmax = IR * .7; } }
-          for (let i = 0; i < 400; i++) {
-            const a = Math.random() * 6.283, r = rmin + Math.random() * (rmax - rmin), x = (near ? near.x : 0) + Math.cos(a) * r, y = (near ? near.y : 0) + Math.sin(a) * r;
-            if (Math.abs(x) > WS - 200 || Math.abs(y) > WS - 200) continue;
-            const e = envAt(x, y), s = envAt(x + 120, y) + envAt(x - 120, y) + envAt(x, y + 120) + envAt(x, y - 120);
-            if (hull.terrain === 'land' ? (e === 0 && s === 0 && fdAt(x, y) < .2) : hull.terrain === 'water' ? (e === 2 && s === 8) : true) return {x, y};
-          }
-          return near ? null : {x: hull.terrain === 'water' ? IR * 1.2 : 0, y: 0};
-        }
+function areaDamage(x, y, r, dmg, pen, team) {
+  GameState.entities.forEach(e => {
+    if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active || e.team === team) return;
+    const d = Math.hypot(e.x - x, e.y - y) - Math.max(e.hull.size.l, e.hull.size.w) * .3;
+    if (d < r) { const f = 1 - Math.max(0, d) / r * .8;
+      e.takeDamage(dmg * f, pen * f, e.x + (Math.random() - .5) * e.hull.size.l * .6, e.y + (Math.random() - .5) * e.hull.size.l * .6, e.angle, 'top'); }
+  });
+}
+function drawArmor(v, ctx, l, w, dead) {
+  const A = v.config.armor || {}, col = a => dead ? '#2a2724' : (a.era ? '#7a6a2e' : (a.id === 'a_comp' ? '#8c7a58' : '#9aa0a6'));
+  ctx.lineWidth = 1; ctx.strokeStyle = '#0c0a09';
+  const plate = (a, x, y, ww, hh) => { ctx.fillStyle = col(a); ctx.fillRect(x, y, ww, hh); ctx.strokeRect(x, y, ww, hh); };
+  if (A.front) plate(A.front, l - 8, -w + 3, 8, w * 2 - 6);
+  if (A.rear) plate(A.rear, -l, -w + 3, 6, w * 2 - 6);
+  if (A.side) { plate(A.side, -l + 8, -w, l * 2 - 18, 4); plate(A.side, -l + 8, w - 4, l * 2 - 18, 4); }
+  if (A.top) { ctx.globalAlpha *= .6; plate(A.top, -l * .35, -w * .5, l * .7, w); ctx.globalAlpha /= .6; }
+  if (!dead) for (const z in v.era) { if (v.era[z] <= 0) continue; ctx.fillStyle = '#facc15';
+    for (let i = 0; i < v.era[z]; i++) { const o = (i - (v.era[z] - 1) / 2) * 5;
+      if (z === 'front') ctx.fillRect(l - 6, o - 1.5, 4, 3); else if (z === 'rear') ctx.fillRect(-l + 2, o - 1.5, 4, 3);
+      else if (z === 'side') { ctx.fillRect(o - 1.5, -w + 1, 3, 2); ctx.fillRect(o - 1.5, w - 3, 3, 2); } else ctx.fillRect(o - 1.5, -2, 3, 4); } }
+}
+function drawLock(ctx) {
+  const L = GameState.lock; if (!L || GameState.mode !== 'combat') return; let x, y;
+  if (L.type === 'entity') { if (L.entity.hp <= 0 || !L.entity.active) { GameState.lock = null; return; } x = L.entity.x; y = L.entity.y; } else { x = L.x; y = L.y; }
+  const t = performance.now() / 1000, k = 1 / Math.sqrt(GameState.camera.zoom), r = (30 + Math.sin(t * 5) * 3) * k;
+  ctx.save(); ctx.translate(x, y); ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2 * k;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.3); ctx.stroke(); ctx.rotate(t);
+  ctx.beginPath(); for (let i = 0; i < 4; i++) { ctx.rotate(1.5708); ctx.moveTo(r - 6 * k, 0); ctx.lineTo(r + 10 * k, 0); } ctx.stroke(); ctx.restore();
+}
 
-        const PX = 8, G = 9.81;
-        const HV = {
-          h_buggy:{vmax:38,yaw:2.4,grip:7,crr:.03,cdA:.7}, h_tank_med:{vmax:17,yaw:1.4,grip:30,crr:.05,cdA:2.4},
-          h_tank_heavy:{vmax:12,yaw:.9,grip:30,crr:.06,cdA:4}, h_boat_patrol:{vmax:21,yaw:.9,grip:2.5,crr:.015,cdA:2.5},
-          h_cruiser:{vmax:16,yaw:.3,grip:1.2,crr:.012,cdA:14}, h_hover:{vmax:28,yaw:1.2,grip:1.4,crr:.02,cdA:1.8}};
-        DB.hulls.forEach(h => Object.assign(h, HV[h.id]));
-        const SPREAD = {w_mg:.04,w_auto30:.02,w_cannon76:.006,w_rocket_pod:.06,w_cannon152:.004,w_naval:.008};
+/* ===== Остров, PP, коллизии ===== */
+const WS = 7000, TC = 20, TN = Math.ceil(2 * WS / TC), IR = 4200, TS = 44, SORTIE = 0, REPAIR = 15, FALLEN = new Set();
+let HG, FG, TCV;
+const lerp = (a, b, k) => a + (b - a) * k, sm = (a, b, x) => { x = Math.max(0, Math.min(1, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
+function hash2(x, y) { let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function vnoise(x, y) { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  return (hash2(ix, iy) * (1 - u) + hash2(ix + 1, iy) * u) * (1 - v) + (hash2(ix, iy + 1) * (1 - u) + hash2(ix + 1, iy + 1) * u) * v; }
+function fbm(x, y, o) { let s = 0, a = .5, f = 1; for (let i = 0; i < o; i++) { s += a * vnoise(x * f, y * f); f *= 2; a *= .5; } return s; }
+function terrainH(x, y) { // неправильный остров: деформация координат + лепестки по углу; рельеф плоский, без гор
+  const wx = x + (fbm(x / 2200 + 3.1, y / 2200 + 8.7, 3) - .5) * 1000, wy = y + (fbm(x / 2200 + 17.3, y / 2200 + 2.2, 3) - .5) * 1000;
+  const a = Math.atan2(wy, wx), rr = IR * (1 + .22 * Math.sin(3 * a + 1.3) + .14 * Math.sin(5 * a + 4.1) + .08 * Math.sin(8 * a + 2.2));
+  const d = Math.hypot(wx, wy) / rr, base = 1 - d * d, w = Math.max(0, Math.min(1, (1.06 - d) / .3));
+  const h = base + (fbm(x / 900 + 11.3, y / 900 + 4.1, 4) - .5) * .9 * w;
+  return h > 0 ? h * .35 : h;
+}
+function buildTerrain() {
+  HG = new Float32Array(TN * TN); FG = new Float32Array(TN * TN); const SC = new Float32Array(TN * TN);
+  for (let j = 0; j < TN; j++) for (let i = 0; i < TN; i++) { const x = -WS + i * TC + TC / 2, y = -WS + j * TC + TC / 2, h = terrainH(x, y), k = j * TN + i; HG[k] = h;
+    FG[k] = h > .02 ? sm(.5, .68, fbm(x / 450 + 50, y / 450 + 70, 3)) * sm(.02, .06, h) * .7 : 0; SC[k] = h > 0 ? fbm(x / 600 + 90, y / 600 + 30, 3) : 0; }
+  TCV = document.createElement('canvas'); TCV.width = TCV.height = TN; const g = TCV.getContext('2d'), im = g.createImageData(TN, TN), D = im.data, N = TN * TN;
+  for (let k = 0; k < N; k++) {
+    const h = HG[k], hx = HG[Math.min(k + 1, N - 1)] - HG[Math.max(k - 1, 0)], hy = HG[Math.min(k + TN, N - 1)] - HG[Math.max(k - TN, 0)]; let r, c, b;
+    if (h <= 0) { const d = Math.min(1, -h / .45); r = lerp(70, 6, d); c = lerp(150, 32, d); b = lerp(160, 72, d);
+      if (h > -.012) { const f = .6 * (1 + h / .012); r = lerp(r, 255, f); c = lerp(c, 255, f); b = lerp(b, 255, f); } }
+    else if (h < .02) { r = 150; c = 128; b = 92; }
+    else { const e = sm(0, .35, h); r = lerp(116, 138, e); c = lerp(96, 114, e); b = lerp(66, 80, e);
+      const s = sm(.46, .66, SC[k]) * .85; r = lerp(r, 46, s); c = lerp(c, 41, s); b = lerp(b, 38, s); // выжженные пятна
+      const f = FG[k] * .6; r = lerp(r, 34, f); c = lerp(c, 30, f); b = lerp(b, 28, f); }
+    const sh = 1 + (hx + hy) * (h > 0 ? 18 : 1.2), cl = v => Math.max(0, Math.min(255, v * sh));
+    D[k * 4] = cl(r); D[k * 4 + 1] = cl(c); D[k * 4 + 2] = cl(b); D[k * 4 + 3] = 255;
+  }
+  g.putImageData(im, 0, 0);
+}
+function hAt(x, y) { const gx = (x + WS) / TC - .5, gy = (y + WS) / TC - .5; if (gx < 0 || gy < 0 || gx >= TN - 1 || gy >= TN - 1) return -1;
+  const i = gx | 0, j = gy | 0, fx = gx - i, fy = gy - j, k = j * TN + i;
+  return (HG[k] * (1 - fx) + HG[k + 1] * fx) * (1 - fy) + (HG[k + TN] * (1 - fx) + HG[k + TN + 1] * fx) * fy; }
+function fdAt(x, y) { const i = Math.floor((x + WS) / TC), j = Math.floor((y + WS) / TC); return (i < 0 || j < 0 || i >= TN || j >= TN) ? 0 : FG[j * TN + i]; }
+function envAt(x, y) { const h = hAt(x, y); return h > 0 ? 0 : (h > -.1 ? 1 : 2); }
+function treeAt(ix, iy) { const f = fdAt(ix * TS + TS / 2, iy * TS + TS / 2); if (f < .12 || hash2(ix, iy) > f * .95) return null; const k = ix + ',' + iy; if (FALLEN.has(k)) return null;
+  return {x: ix * TS + hash2(ix + 99, iy) * TS, y: iy * TS + hash2(ix, iy + 99) * TS, r: 8 + hash2(ix + 5, iy + 7) * 8, k}; }
+function treeHit(x, y, r) { const ix = Math.floor(x / TS), iy = Math.floor(y / TS);
+  for (let a = ix - 1; a <= ix + 1; a++) for (let b = iy - 1; b <= iy + 1; b++) { const t = treeAt(a, b); if (t && Math.hypot(x - t.x, y - t.y) < t.r + r) return t; } return null; }
+function drawMap2(ctx) {
+  const z = GameState.camera.zoom, L = -GameState.camera.x / z - 40, R = (canvas.width - GameState.camera.x) / z + 40, T = -GameState.camera.y / z - 40, B = (canvas.height - GameState.camera.y) / z + 40, t = performance.now() / 1000;
+  ctx.fillStyle = '#06203f'; ctx.fillRect(L, T, R - L, B - T); ctx.imageSmoothingEnabled = true; ctx.drawImage(TCV, -WS, -WS, 2 * WS, 2 * WS);
+  if (!PAT.n) PAT.n = ctx.createPattern(makePat('#808080', ['#6a6a6a', '#969696']), 'repeat');
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = .35; ctx.fillStyle = PAT.n; ctx.fillRect(L, T, R - L, B - T); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  if (z >= .5) { ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let gx = Math.floor(L / 70) * 70; gx < R; gx += 70) for (let gy = Math.floor(T / 50) * 50; gy < B; gy += 50) { if (hAt(gx, gy) > -.03) continue;
+      const ox = Math.sin(gx * .13 + gy * .07 + t * 1.3) * 10; ctx.moveTo(gx + ox, gy); ctx.quadraticCurveTo(gx + ox + 10, gy - 4, gx + ox + 20, gy); }
+    ctx.stroke(); }
+  if (z >= .45) { const tr = [];
+    for (let ix = Math.floor(L / TS); ix <= R / TS; ix++) for (let iy = Math.floor(T / TS); iy <= B / TS; iy++) { const q = treeAt(ix, iy); if (q) tr.push(q); }
+    ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); for (const q of tr) { ctx.moveTo(q.x + 6 + q.r, q.y + 7); ctx.arc(q.x + 6, q.y + 7, q.r, 0, 6.3); } ctx.fill();
+    ctx.fillStyle = '#2f2824'; ctx.beginPath(); for (const q of tr) { ctx.moveTo(q.x + q.r, q.y); ctx.arc(q.x, q.y, q.r, 0, 6.3); } ctx.fill();
+    ctx.fillStyle = '#4a3e34'; ctx.beginPath(); for (const q of tr) { ctx.moveTo(q.x - 2 + q.r * .55, q.y - 2); ctx.arc(q.x - 2, q.y - 2, q.r * .55, 0, 6.3); } ctx.fill(); }
+}
+function steerEnv(v, want) {
+  const h = v.hull, ok = (x, y) => { const e = envAt(x, y); return h.terrain === 'land' ? (e === 0 && (fdAt(x, y) < .75 || v.mass > 25000)) : h.terrain === 'water' ? e === 2 : true; };
+  for (const o of [0, .5, -.5, 1, -1, 1.6, -1.6, 2.4]) { const a = want + o; if (ok(v.x + Math.cos(a) * 180, v.y + Math.sin(a) * 180) && ok(v.x + Math.cos(a) * 90, v.y + Math.sin(a) * 90)) return a; }
+  return want + Math.PI;
+}
+function findSpawn(hull, near, rmin, rmax) {
+  if (!near) { if (hull.terrain === 'water') { rmin = IR * 1.12; rmax = IR * 1.3; } else { rmin = 0; rmax = IR * .7; } }
+  for (let i = 0; i < 400; i++) {
+    const a = Math.random() * 6.283, r = rmin + Math.random() * (rmax - rmin), x = (near ? near.x : 0) + Math.cos(a) * r, y = (near ? near.y : 0) + Math.sin(a) * r;
+    if (Math.abs(x) > WS - 200 || Math.abs(y) > WS - 200) continue;
+    const e = envAt(x, y), s = envAt(x + 120, y) + envAt(x - 120, y) + envAt(x, y + 120) + envAt(x, y - 120);
+    if (hull.terrain === 'land' ? (e === 0 && s === 0 && fdAt(x, y) < .2) : hull.terrain === 'water' ? (e === 2 && s === 8) : true) return {x, y};
+  }
+  return near ? null : {x: hull.terrain === 'water' ? IR * 1.2 : 0, y: 0};
+}
+function collideVehicles() {
+  const V = GameState.entities.filter(e => e instanceof Vehicle && e.hp > 0 && e.active);
+  for (let i = 0; i < V.length; i++) for (let j = i + 1; j < V.length; j++) {
+    const a = V[i], b = V[j], ra = (a.hull.size.l + a.hull.size.w) / 4, rb = (b.hull.size.l + b.hull.size.w) / 4, dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ov = ra + rb - d;
+    if (ov <= 0) continue;
+    const nx = dx / d, ny = dy / d, ia = 1 / a.mass, ib = 1 / b.mass, k = ov / (ia + ib);
+    a.x -= nx * k * ia; a.y -= ny * k * ia; b.x += nx * k * ib; b.y += ny * k * ib;
+    const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    if (rv < 0) { const J = -1.25 * rv / (ia + ib); a.vx -= J * ia * nx; a.vy -= J * ia * ny; b.vx += J * ib * nx; b.vy += J * ib * ny;
+      const sp = -rv;
+      if (sp > 3) { const e = .5 * sp * sp / (ia + ib) / 1000 * .4;
+        for (const [u, o] of [[a, b], [b, a]]) { u.hp -= e * o.mass / (a.mass + b.mass); if (u.hp <= 0) u.die('hp'); }
+        createExplosion((a.x + b.x) / 2, (a.y + b.y) / 2, 8, '#fde047', 6); GameState.shake = Math.max(GameState.shake || 0, Math.min(10, sp)); } }
+  }
+}
+function bounty(e) { return Math.max(15, Math.min(145, Math.round(10 + e.maxHp * .012 + Object.values(e.config.weapons).reduce((s, w) => s + w.dmg, 0) * .035 + Object.keys(e.config.armor || {}).length * 5))); }
+function shopDialog(item, onYes) {
+  const old = document.getElementById('shopdlg'); if (old) old.remove();
+  const d = document.createElement('div'); d.id = 'shopdlg';
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center';
+  d.innerHTML = '<div style="background:#1c1917;border:2px solid #f59e0b;border-radius:12px;padding:22px 26px;max-width:340px;color:#e7e5e4;text-align:center;font-family:inherit;box-shadow:0 10px 40px #000">' +
+    '<div style="font-size:2rem">' + (item.icon || '') + '</div><div style="font-weight:700;font-size:1.1rem;margin:6px 0">' + item.name + '</div>' +
+    '<div style="color:#a8a29e;font-size:.85rem;margin-bottom:12px">' + (item.desc || '') + '</div>' +
+    '<div style="color:#fbbf24;font-weight:700;margin-bottom:14px">Цена: ' + item.cost + ' PP · у вас ' + GameState.pp + ' PP</div>' +
+    '<button id="shop-yes" style="background:#f59e0b;color:#1c1917;border:0;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;margin-right:8px">Купить</button>' +
+    '<button id="shop-no" style="background:#44403c;color:#e7e5e4;border:0;border-radius:8px;padding:9px 18px;cursor:pointer">Отмена</button></div>';
+  document.body.appendChild(d);
+  const close = () => d.remove();
+  d.querySelector('#shop-yes').onclick = () => { close(); onYes(); };
+  d.querySelector('#shop-no').onclick = close;
+  d.onclick = e => { if (e.target === d) close(); };
+}
+function refreshPP() {
+  const e = document.getElementById('ppbox'); if (!e) return; const g = GameState.mode === 'garage';
+  e.innerHTML = 'PP: ' + GameState.pp + (g ? ' <button onclick="toggleRepair()" style="margin-left:12px;background:' + (GameState.repairBuy ? '#16a34a' : '#44403c') + ';color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">🔧 Ремонт ' + (GameState.repairBuy ? '✓ ' : '') + REPAIR + ' PP</button>' : '');
+}
+function toggleRepair() { GameState.repairBuy = !GameState.repairBuy; savePP(); }
+function startRepair() {
+  const v = playerVehicle; if (GameState.mode !== 'combat' || !v || v.hp <= 0 || v.repairT > 0) return;
+  if (!GameState.kit) { showMessage('Ремкомплекта нет (покупается в гараже)'); return; }
+  const m = v.mods; if (v.hp >= v.maxHp && !v.fire && v.flood < .01 && m.engine >= 1 && m.tracks >= 1 && m.crew >= 1) { showMessage('Ремонт не нужен'); return; }
+  GameState.kit = false; v.repairT = 5; showMessage('Ремонт: 5 секунд - не погибни!');
+}
+function savePP() { try { localStorage.setItem('war_pp', JSON.stringify({pp: GameState.pp, owned: [...GameState.owned]})); } catch (e) {} refreshPP(); }
+function drawMini() {
+  const c = document.getElementById('mini'); if (!c) return; if (GameState.mode !== 'combat') { c.style.display = 'none'; return; }
+  c.style.display = 'block'; const g = c.getContext('2d'), S = c.width, sc = S / (2 * WS), z = GameState.camera.zoom; g.clearRect(0, 0, S, S); g.drawImage(TCV, 0, 0, S, S);
+  GameState.entities.forEach(e => { if (!(e instanceof Vehicle) || e.hp <= 0) return; g.fillStyle = e.isPlayer ? '#fde047' : '#ef4444'; g.beginPath(); g.arc((e.x + WS) * sc, (e.y + WS) * sc, e.isPlayer ? 4 : 3, 0, 6.3); g.fill(); });
+  g.strokeStyle = '#fff'; g.strokeRect((-GameState.camera.x / z + WS) * sc, (-GameState.camera.y / z + WS) * sc, canvas.width / z * sc, canvas.height / z * sc);
+}
+buildTerrain();
 
-        function accelOf(h, eng, mass, v, thr, effEng, vm) {
-          const Pw = eng.power * .8 * effEng; let F = 0;
-          if (thr > 0) F = Math.min(Pw / Math.max(v, 2), mass * G * .7) * Math.max(0, 1 - Math.pow(Math.max(v, 0) / vm, 3));
-          else if (thr < 0) F = v > .5 ? -mass * G * .45 : -Math.min(Pw * .5 / Math.max(-v, 2), mass * G * .4) * Math.max(0, 1 - Math.pow(-v / (vm * .35), 3));
-          return (F - (h.crr * mass * G * (thr === 0 ? 2.5 : 1) * Math.sign(v) + h.cdA * v * Math.abs(v))) / mass;
-        }
-        function calcTop(h, eng, mass) { let v = 0; for (let i = 0; i < 1500; i++) v += accelOf(h, eng, mass, v, 1, 1, h.vmax) * .1; return v; }
+// Реальные прототипы, ограничения по массе корпуса, цены в PP
+const WR = {
+  w_mg:{name:'Пулемёт 12,7 мм (M2 Browning)', desc:'Скорострельный. Бесполезен против брони, косит лёгкую технику.'},
+  w_atgm:{name:'ПТУР "Корнет" (9М133)', size:2, minMass:10000, desc:'Самонаводящаяся ПТУР. Нужен корпус от 10 т. ПКМ - захват цели.'},
+  w_auto30:{name:'Автопушка 30 мм (2А42)'}, w_cannon76:{name:'Пушка 76 мм (ЗИС-3)'}, w_rocket_pod:{name:'РСЗО "Град" (БМ-21)'},
+  w_cannon152:{name:'Гаубица 152 мм (2А65)'}, w_naval:{name:'Корабельная башня 2x203 мм'}, w_cruise:{name:'Крылатая ракета "Калибр"', minMass:30000},
+  w_bm_light:{name:'Тактическая ракета "Точка-У"', size:2, minMass:30000, desc:'Взлетает и пикирует на цель. Нужен корпус от 30 т.'},
+  w_bm_mid:{name:'ОТРК "Искандер-М"', size:3, minMass:30000}, w_bm_heavy:{name:'Баллистическая "Сармат"', size:3, minMass:30000}};
+for (const id in WR) Object.assign(DB.weapons.find(w => w.id === id), WR[id]);
+const COST = {h_buggy:0,h_hover:60,h_tank_med:90,h_boat_patrol:70,h_tank_heavy:140,h_cruiser:180,w_mg:0,w_auto30:25,w_cannon76:40,w_atgm:45,w_rocket_pod:50,w_cannon152:80,w_naval:90,w_cruise:120,w_bm_light:70,w_bm_mid:110,w_bm_heavy:150,a_steel:15,a_comp:40,a_era:30};
+[...DB.hulls, ...DB.weapons, ...ARM].forEach(i => i.cost = COST[i.id] ?? 50);
+DB.engines.forEach((e, i) => e.cost = [0, 30, 60, 120][i] ?? 120);
+GameState.pp = 150; GameState.owned = new Set(['h_buggy', DB.engines[0].id, 'w_mg']);
+try { const s = JSON.parse(localStorage.getItem('war_pp')); if (s) { GameState.pp = s.pp; s.owned.forEach(i => GameState.owned.add(i)); } } catch (e) {}
+currentConfig.hull = DB.hulls[0]; currentConfig.engine = DB.engines[0]; currentConfig.weapons = {m1: DB.weapons[0]};
+window.addEventListener('load', () => {
+  document.body.insertAdjacentHTML('beforeend', '<div id="ppbox" style="position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#1c1917e6;border:1px solid #f59e0b;padding:6px 16px;border-radius:8px;color:#fbbf24;font-weight:700;z-index:50"></div><canvas id="mini" width="170" height="170" style="position:fixed;right:12px;bottom:12px;width:170px!important;height:170px!important;pointer-events:none;border:2px solid #57534e;border-radius:8px;z-index:20;background:#06203f;display:none"></canvas>');
+  refreshPP();
+});
 
-        class Vehicle {
-          constructor(x, y, config, isPlayer, team) {
-            this.id = myPlayerId;
-            this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.angle = 0; this.yaw = 0;
-            this.config = config; this.isPlayer = isPlayer; this.team = team; this.active = true;
-            this.hull = config.hull; this.engine = config.engine;
-            this.mass = this.hull.mass + this.engine.mass;
-            Object.values(config.weapons).forEach(w => this.mass += w.mass);
-            this.maxHp = this.hull.hp; this.hp = this.maxHp;
-            this.mods = {engine:1, tracks:1, crew:1};
-            this.flood = 0; this.floodRate = 0; this.fire = false; this.dead = null; this.deadT = 0;
-            this.weaponSystems = [];
-            this.hull.mounts.forEach(m => { const w = config.weapons[m.id]; if (w) this.weaponSystems.push(new WeaponSystem(m, w, this)); });
-          }
-          get fwdSpeed() { return this.vx * Math.cos(this.angle) + this.vy * Math.sin(this.angle); }
+/* ===== Физика, повреждения, эффекты ===== */
+const PX = 8, G = 9.81; // 1 м = 8 px
+const HV = {
+  h_buggy:{vmax:38,yaw:2.4,grip:7,crr:.03,cdA:.7}, h_tank_med:{vmax:17,yaw:1.4,grip:30,crr:.05,cdA:2.4},
+  h_tank_heavy:{vmax:12,yaw:.9,grip:30,crr:.06,cdA:4}, h_boat_patrol:{vmax:21,yaw:.9,grip:2.5,crr:.015,cdA:2.5},
+  h_cruiser:{vmax:16,yaw:.3,grip:1.2,crr:.012,cdA:14}, h_hover:{vmax:28,yaw:1.2,grip:1.4,crr:.02,cdA:1.8}};
+DB.hulls.forEach(h => Object.assign(h, HV[h.id]));
+const SPREAD = {w_mg:.04,w_auto30:.02,w_cannon76:.006,w_rocket_pod:.06,w_cannon152:.004,w_naval:.008};
 
-          update(dt) {
-            if (this.hp <= 0) { this.wreck(dt); return; }
-            const h = this.hull, m = this.mods, combat = GameState.mode === 'combat';
-            
-            let thr = 0, turn = 0, trig = false, tx = 0, ty = 0;
-            if (this.isPlayer && combat) {
-              const k = GameState.keys;
-              if (k['w'] || k['W']) thr = 1; if (k['s'] || k['S']) thr = -1;
-              if (k['a'] || k['A']) turn = -1; if (k['d'] || k['D']) turn = 1;
-              if (thr < 0) turn *= -1;
-              tx = GameState.mouse.worldX; ty = GameState.mouse.worldY; trig = GameState.mouse.down;
-            }
+function accelOf(h, eng, mass, v, thr, effEng, vm) {
+  const Pw = eng.power * .8 * effEng; let F = 0;
+  if (thr > 0) F = Math.min(Pw / Math.max(v, 2), mass * G * .7) * Math.max(0, 1 - Math.pow(Math.max(v, 0) / vm, 3));
+  else if (thr < 0) F = v > .5 ? -mass * G * .45 : -Math.min(Pw * .5 / Math.max(-v, 2), mass * G * .4) * Math.max(0, 1 - Math.pow(-v / (vm * .35), 3));
+  return (F - (h.crr * mass * G * (thr === 0 ? 2.5 : 1) * Math.sign(v) + h.cdA * v * Math.abs(v))) / mass;
+}
+function calcTop(h, eng, mass) { let v = 0; for (let i = 0; i < 1500; i++) v += accelOf(h, eng, mass, v, 1, 1, h.vmax) * .1; return v; }
 
-            const depth = envAt(this.x, this.y);
-            let wet = 1, grounded = false;
-            if (h.terrain === 'land') {
-              if (depth === 1) wet = .6;
-              else if (depth === 2) { wet = .25; this.floodRate = Math.max(this.floodRate, .12); }
-              else this.floodRate *= Math.exp(-.5 * dt);
-            } else if (h.terrain === 'water') {
-              if (depth === 0) { wet = 0; grounded = true; } else if (depth === 1) wet = .65;
-            }
-            this.floodRate *= Math.exp(-.03 * dt);
-            this.flood += this.floodRate * dt;
-            if (this.flood >= 1) { this.die('sunk'); return; }
-            if (this.fire) { this.hp -= this.maxHp * .012 * dt; if (this.hp <= 0) { this.die('fire'); return; } }
+class Vehicle {
+  constructor(x, y, config, isPlayer, team) {
+    this.id = myPlayerId || 'local';
+    this.x = x; this.y = y; this.vx = 0; this.vy = 0; this.angle = 0; this.yaw = 0;
+    this.config = config; this.isPlayer = isPlayer; this.team = team; this.active = true;
+    this.hull = config.hull; this.engine = config.engine;
+    this.mass = this.hull.mass + this.engine.mass;
+    Object.values(config.weapons).forEach(w => this.mass += w.mass);
+    Object.values(config.armor || {}).forEach(a => this.mass += armorMass(a, this.hull));
+    this.maxHp = this.hull.hp; this.hp = this.maxHp;
+    this.mods = {engine:1, tracks:1, crew:1};
+    this.era = {}; Object.entries(config.armor || {}).forEach(([z, a]) => { if (a.era) this.era[z] = a.era; });
+    this.grace = isPlayer ? 0 : 5;
+    this.flood = 0; this.floodRate = 0; this.fire = false; this.dead = null; this.deadT = 0; this.dist = 0; this.warned = false;
+    this.orbit = Math.random() < .5 ? 1 : -1;
+    this.weaponSystems = [];
+    this.hull.mounts.forEach(m => { const w = config.weapons[m.id]; if (w) this.weaponSystems.push(new WeaponSystem(m, w, this)); });
+  }
+  get fwdSpeed() { return this.vx * Math.cos(this.angle) + this.vy * Math.sin(this.angle); }
 
-            const vm = Math.max(.01, h.vmax * Math.max(.04, m.tracks) * wet * (1 - .6 * this.flood));
-            const sp0 = Math.abs(this.fwdSpeed);
-            const sf = h.drawType === 'tank' ? 1 : (h.drawType === 'hover' ? .35 + .65 * Math.min(1, sp0 / 4) : Math.min(1, .15 + sp0 / 3));
-            this.yaw += (turn * h.yaw * Math.max(.2, m.tracks) * Math.max(.2, wet) * sf - this.yaw) * Math.min(1, dt * 5);
-            this.angle += this.yaw * dt;
-            const c = Math.cos(this.angle), s = Math.sin(this.angle);
-            let vf = this.vx * c + this.vy * s, vl = -this.vx * s + this.vy * c;
-            if (grounded) { vf *= Math.exp(-5 * dt); vl *= Math.exp(-5 * dt); }
-            else {
-              vf += accelOf(h, this.engine, this.mass, vf, thr, m.engine * (1 - .5 * this.flood), vm) * dt;
-              vl *= Math.exp(-h.grip * dt);
-              if (!thr && Math.abs(vf) < .2) vf = 0;
-            }
-            this.vx = vf * c - vl * s; this.vy = vf * s + vl * c;
-            this.x += this.vx * PX * dt; this.y += this.vy * PX * dt;
-            this.x = Math.max(-WS + 60, Math.min(WS - 60, this.x)); this.y = Math.max(-WS + 60, Math.min(WS - 60, this.y));
+  update(dt) {
+    if (this.hp <= 0) { this.wreck(dt); return; }
+    const h = this.hull, m = this.mods, combat = GameState.mode === 'combat';
+    if (this.grace > 0) this.grace -= dt;
+    if (this.repairT > 0) {
+      this.repairT -= dt; if (Math.random() < .5) P(this.x + (Math.random() - .5) * h.size.l * .6, this.y + (Math.random() - .5) * h.size.w, (Math.random() - .5) * 40, -30, .5, '#4ade80', 2.5, {add: true});
+      if (this.repairT <= 0) { this.repairT = 0; this.hp = this.maxHp; this.flood = 0; this.floodRate = 0; this.fire = false; m.engine = m.tracks = m.crew = 1;
+        Object.entries(this.config.armor || {}).forEach(([z, a]) => { if (a.era) this.era[z] = a.era; }); showMessage('Ремонт завершён!'); }
+    }
+    if (this.isPlayer && combat) { this.ppT = (this.ppT || 0) + dt; if (this.ppT >= 4) { this.ppT = 0; GameState.pp++; savePP(); } }
+    let thr = 0, turn = 0, trig = false, tx = 0, ty = 0;
+    if (this.isPlayer && combat) {
+      const k = GameState.keys;
+      if (k['w'] || k['W']) thr = 1; if (k['s'] || k['S']) thr = -1;
+      if (k['a'] || k['A']) turn = -1; if (k['d'] || k['D']) turn = 1;
+      if (thr < 0) turn *= -1;
+      tx = GameState.mouse.worldX; ty = GameState.mouse.worldY; trig = GameState.mouse.down;
+    } else if (!this.isPlayer && combat && playerVehicle && playerVehicle.hp > 0) {
+      const p = playerVehicle, dx = p.x - this.x, dy = p.y - this.y, dist = Math.hypot(dx, dy), w0 = this.weaponSystems[0];
+      const lead = Math.min(dist / (w0 ? w0.data.vel : 800), 1.5);
+      tx = p.x + p.vx * PX * lead; ty = p.y + p.vy * PX * lead; // упреждение
+      const R = w0 ? Math.min(w0.data.range * .6, 600) : 300;
+      let want = Math.atan2(dy, dx); if (dist < R) want += this.orbit * 1.2;
+      want = steerEnv(this, want);
+      const d = Math.atan2(Math.sin(want - this.angle), Math.cos(want - this.angle));
+      turn = Math.max(-1, Math.min(1, d * 2)); thr = Math.abs(d) < 1.2 ? (dist > R ? 1 : .6) : 0; trig = this.grace <= 0;
+    }
 
-            if (m.crew > 0) this.weaponSystems.forEach(ws => ws.update(dt, tx, ty, trig));
-            if (this.isPlayer) updateHUD();
+    // Среда: 0 суша, 1 мелководье (0..80px), 2 глубина
+    const depth = envAt(this.x, this.y);
+    let wet = 1, grounded = false;
+    if (h.terrain === 'land') {
+      if (depth === 1) wet = .6;
+      else if (depth === 2) { wet = .25; this.floodRate = Math.max(this.floodRate, .12); if (!this.warned && this.isPlayer) { this.warned = true; showMessage("Машина тонет! Назад к берегу!"); } }
+      else this.floodRate *= Math.exp(-.5 * dt);
+    } else if (h.terrain === 'water') {
+      if (depth === 0) { wet = 0; grounded = true; } else if (depth === 1) wet = .65;
+    }
+    this.floodRate *= Math.exp(-.03 * dt); // аварийная партия
+    this.flood += this.floodRate * dt;
+    if (this.flood >= 1) { this.die('sunk'); return; }
+    if (this.fire) { this.hp -= this.maxHp * .012 * dt; if (this.hp <= 0) { this.die('fire'); return; } }
 
-            // Синхронизация с сервером
-            if (this.isPlayer && myPlayerId) {
-                socket.emit('playerUpdate', {
-                    id: myPlayerId,
-                    x: this.x,
-                    y: this.y,
-                    angle: this.angle,
-                    vx: this.vx,
-                    vy: this.vy
-                });
-            }
-          }
+    // Движение
+    const vm = Math.max(.01, h.vmax * Math.max(.04, m.tracks) * wet * (1 - .6 * this.flood) * (1 - (depth === 0 ? fdAt(this.x, this.y) * (h.drawType === 'car' ? .55 : .3) : 0)));
+    const sp0 = Math.abs(this.fwdSpeed);
+    const sf = h.drawType === 'tank' ? 1 : (h.drawType === 'hover' ? .35 + .65 * Math.min(1, sp0 / 4) : Math.min(1, .15 + sp0 / 3));
+    this.yaw += (turn * h.yaw * Math.max(.2, m.tracks) * Math.max(.2, wet) * sf - this.yaw) * Math.min(1, dt * 5);
+    this.angle += this.yaw * dt;
+    const c = Math.cos(this.angle), s = Math.sin(this.angle);
+    let vf = this.vx * c + this.vy * s, vl = -this.vx * s + this.vy * c;
+    if (grounded) { vf *= Math.exp(-5 * dt); vl *= Math.exp(-5 * dt); }
+    else {
+      vf += accelOf(h, this.engine, this.mass, vf, thr, m.engine * (1 - .5 * this.flood), vm) * dt;
+      if (depth === 0) vf -= G * Math.max(-.5, Math.min(.5, ((hAt(this.x + 16, this.y) - hAt(this.x - 16, this.y)) * c + (hAt(this.x, this.y + 16) - hAt(this.x, this.y - 16)) * s) / 32 * 320)) * dt * (h.drawType === 'hover' ? .4 : 1);
+      vl *= Math.exp(-h.grip * dt);
+      if (!thr && Math.abs(vf) < .2) vf = 0;
+    }
+    this.vx = vf * c - vl * s; this.vy = vf * s + vl * c;
+    this.x += this.vx * PX * dt; this.y += this.vy * PX * dt; this.dist += vf * dt;
+    if (h.terrain !== 'water' && depth === 0) { // деревья: лёгкая техника упирается, тяжёлая (>25 т) валит
+      const vr = Math.min(h.size.w, h.size.l * .5) * .5, T = treeHit(this.x, this.y, vr);
+      if (T) { if (this.mass > 25000) { FALLEN.add(T.k); this.vx *= .88; this.vy *= .88; dust(T.x, T.y, 10); }
+        else { const dx = this.x - T.x, dy = this.y - T.y, dd = Math.hypot(dx, dy) || 1; this.x = T.x + dx / dd * (T.r + vr); this.y = T.y + dy / dd * (T.r + vr); this.vx *= .35; this.vy *= .35; } }
+    }
+    this.x = Math.max(-WS + 60, Math.min(WS - 60, this.x)); this.y = Math.max(-WS + 60, Math.min(WS - 60, this.y));
 
-          takeDamage(dmg, pen, hx, hy, pa, zf) {
-            if (this.hp <= 0) return;
-            const h = this.hull, m = this.mods;
-            this.hp -= dmg;
-            createMessage(hx, hy, `-${Math.round(dmg)}`, '#ef4444');
-            const k = dmg / this.maxHp * 2.5;
-            if (lx < -l * .25) m.engine = Math.max(0, m.engine - k * 1.6);
-            else m.crew = Math.max(0, m.crew - k * 1.2);
-            if (m.engine < .5 && !this.fire) { this.fire = true; if (this.isPlayer) showMessage("Пожар в моторном отсеке!"); }
-            if (this.hp <= 0) this.die('hp');
-            else if (m.crew <= 0) this.die('crew');
-            if (this.isPlayer) updateHUD();
+    // Эффекты
+    const sp = Math.hypot(this.vx, this.vy), bx = this.x - c * h.size.l / 2, by = this.y - s * h.size.l / 2;
+    if (depth > 0 && sp > 2 && Math.random() < Math.min(1, .1 + sp * .04))
+      P(bx, by, (Math.random() - .5) * 20, (Math.random() - .5) * 20, 1.6, 'rgba(255,255,255,.4)', 4 + Math.random() * 4, {grow: 8, drag: .96});
+    if (depth === 0 && h.terrain !== 'water' && sp > 4 && Math.random() < .3) P(bx, by, 0, 0, .9, 'rgba(120,100,60,.35)', 5, {grow: 12});
+    if (m.engine < .6 && Math.random() < .4) P(this.x - c * l(h), this.y - s * l(h), 0, 0, 1.4, 'rgba(30,28,26,.55)', 4, {grow: 10, rise: 18});
+    if (this.fire && Math.random() < .6) P(this.x + (Math.random() - .5) * 20, this.y + (Math.random() - .5) * 20, 0, 0, .5, '#f97316', 5, {add: true, rise: 25, grow: -6});
+    if (this.flood > .05 && Math.random() < this.flood * .3) P(this.x + (Math.random() - .5) * h.size.l * .6, this.y + (Math.random() - .5) * h.size.w * .6, 0, 0, .9, 'rgba(200,230,255,.6)', 3, {grow: 6});
 
-            // Синхронизация урона
-            if (this.isPlayer && myPlayerId) {
-                socket.emit('hit', {
-                    targetId: myPlayerId,
-                    hp: this.hp,
-                    mods: this.mods,
-                    flood: this.flood,
-                    fire: this.fire
-                });
-            }
-          }
+    if (m.crew > 0) this.weaponSystems.forEach(ws => ws.update(dt, tx, ty, trig));
+    if (this.isPlayer) updateHUD();
 
-          die(cause) {
-            if (this.dead) return;
-            this.hp = 0; this.dead = cause || 'hp'; this.deadT = 0;
-            const big = Math.max(40, this.hull.size.l);
-            createExplosion(this.x, this.y, big, '#f97316', 35);
-            if (this.isPlayer) { showMessage('ТЕХНИКА УНИЧТОЖЕНА'); setTimeout(() => switchMode('garage'), 3500); }
+    // Синхронизация с сервером (только для игрока)
+    if (this.isPlayer && myPlayerId) {
+        socket.emit('playerUpdate', {
+            id: myPlayerId,
+            x: this.x,
+            y: this.y,
+            angle: this.angle,
+            vx: this.vx,
+            vy: this.vy
+        });
+    }
+  }
 
-            // Синхронизация смерти
-            if (this.isPlayer && myPlayerId) {
-                socket.emit('playerDeath', { id: myPlayerId, cause });
-            }
-          }
+  takeDamage(dmg, pen, hx, hy, pa, zf) {
+    if (this.hp <= 0) return;
+    const h = this.hull, m = this.mods, c = Math.cos(this.angle), s = Math.sin(this.angle), dx = hx - this.x, dy = hy - this.y;
+    const lx = dx * c + dy * s, ly = -dx * s + dy * c, l = h.size.l / 2, w = h.size.w / 2, inc = Math.cos(pa - this.angle);
+    const ship = h.drawType === 'boat' || h.drawType === 'ship';
+    const zn = zf || (ship ? (Math.abs(ly) > w * .6 ? 'side' : (lx > 0 ? 'front' : 'rear')) : (inc < -.6 ? 'front' : (inc > .6 ? 'rear' : 'side')));
+    const BASE = ship ? {side:1, front:.65, rear:.65, top:.5} : {front:1, side:.65, rear:.4, top:.3};
+    const ar = (this.config.armor || {})[zn];
+    const eff = h.armor * BASE[zn] + (ar ? ar.add : 0);
+    if (ar && ar.era && this.era[zn] > 0 && dmg >= 60) { this.era[zn]--; createExplosion(hx, hy, 18, '#f97316', 12); createMessage(hx, hy, 'ДЗ СРАБОТАЛА', '#fbbf24'); dmg *= .08; pen *= .2; }
+    if (pen < eff * .7) { createMessage(hx, hy, "РИКОШЕТ", "#d6d3d1"); for (let i = 0; i < 6; i++) P(hx, hy, (Math.random() - .5) * 200, (Math.random() - .5) * 200, .25, '#fde68a', 1.5, {add: true}); return; }
+    const full = pen >= eff;
+    if (!full) dmg *= .3;
+    this.hp -= dmg;
+    createMessage(hx, hy, `-${Math.round(dmg)}${full ? '' : ' (не пробил)'}`, full ? '#ef4444' : '#f59e0b');
+    const k = dmg / this.maxHp * (full ? 2.5 : .6);
+    if (full) {
+      if (ship || h.drawType === 'hover') { // пробоина = течь, не ждём разрушения корпуса
+        this.floodRate += dmg / this.maxHp * .4;
+        if (lx < 0) m.engine = Math.max(0, m.engine - k * 1.5); else m.crew = Math.max(0, m.crew - k);
+      } else {
+        if (lx < -l * .25) m.engine = Math.max(0, m.engine - k * 1.6);
+        else if (Math.abs(ly) > w * .6) m.tracks = Math.max(0, m.tracks - k * 1.8);
+        else m.crew = Math.max(0, m.crew - k * 1.2);
+        if (h.drawType === 'tank' && Math.abs(lx) < l * .5 && Math.random() < .1 + k * .5) { this.die('ammo'); return; }
+      }
+    }
+    if (m.engine < .5 && !this.fire && Math.random() < .6) { this.fire = true; if (this.isPlayer) showMessage("Пожар в моторном отсеке!"); }
+    if (this.hp <= 0) this.die(ship && this.flood > .2 ? 'sunk' : 'hp'); else if (m.crew <= 0) this.die('crew');
+    if (this.isPlayer) updateHUD();
 
-          wreck(dt) {
-            this.deadT += dt;
-            this.vx *= Math.exp(-1.5 * dt); this.vy *= Math.exp(-1.5 * dt); this.x += this.vx * PX * dt; this.y += this.vy * PX * dt;
-            if (this.deadT > 25) this.active = false;
-          }
+    // Синхронизация урона
+    if (this.isPlayer && myPlayerId) {
+        socket.emit('hit', {
+            targetId: myPlayerId,
+            hp: this.hp,
+            mods: this.mods,
+            flood: this.flood,
+            fire: this.fire
+        });
+    }
+  }
 
-          draw(ctx) {
-            const h = this.hull, dead = this.hp <= 0, l = h.size.l / 2, w = h.size.w / 2, type = h.drawType;
-            const sk = this.dead === 'sunk' ? Math.min(1, this.deadT / 6) : 0;
-            const pal = dead ? ['#33302b', '#1a1816'] : (this.team === 1 ? ['#7ea03a', '#46661f'] : ['#b84a3a', '#6a2219']);
-            ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.globalAlpha = 1 - sk * .9;
-            if (!dead) ctx.scale(1, 1 - this.flood * .1);
-            const g = ctx.createLinearGradient(0, -w, 0, w); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
-            const sh = () => { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 9; ctx.shadowOffsetX = 6; ctx.shadowOffsetY = 8; };
-            const nosh = () => { ctx.shadowColor = 'transparent'; };
-            ctx.lineJoin = 'round'; ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 2;
-            if (type === 'tank') {
-              const off = (this.dist * PX) % 7;
-              sh(); ctx.fillStyle = '#16130f'; for (const s of [-1, 1]) ctx.fillRect(-l - 3, s * (w - 3) - 6, l * 2 + 6, 12);
-              nosh(); ctx.strokeStyle = '#3d372e'; ctx.lineWidth = 1.5; ctx.beginPath();
-              for (const s of [-1, 1]) for (let x = -l - 3 + off; x < l + 3; x += 7) { ctx.moveTo(x, s * (w - 3) - 6); ctx.lineTo(x, s * (w - 3) + 6); }
-              ctx.stroke(); ctx.fillStyle = '#625a4d';
-              for (const s of [-1, 1]) for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(-l + 6 + i * (l * 2 - 12) / 5, s * (w - 3), 3.4, 0, 6.3); ctx.fill(); }
-              ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 2; ctx.fillStyle = g; ctx.beginPath();
-              ctx.moveTo(-l, -w + 8); ctx.lineTo(-l + 8, -w + 4); ctx.lineTo(l - 14, -w + 4); ctx.lineTo(l, -w + 12); ctx.lineTo(l, w - 12); ctx.lineTo(l - 14, w - 4); ctx.lineTo(-l + 8, w - 4); ctx.lineTo(-l, w - 8);
-              ctx.closePath(); ctx.fill(); ctx.stroke();
-            } else if (type === 'car') {
-              sh(); ctx.fillStyle = '#16130f';
-              for (const sx of [-l * .62, l * .62]) for (const s of [-1, 1]) ctx.fillRect(sx - 6, s * (w - 1) - 3, 12, 6);
-              ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-l, -w + 3); ctx.lineTo(l * .7, -w + 3); ctx.lineTo(l, -w * .5); ctx.lineTo(l, w * .5); ctx.lineTo(l * .7, w - 3); ctx.lineTo(-l, w - 3);
-              ctx.closePath(); ctx.fill(); nosh(); ctx.stroke();
-              ctx.fillStyle = 'rgba(120,190,230,.55)'; ctx.fillRect(l * .15, -w + 5, l * .25, w * 2 - 10);
-              ctx.strokeStyle = '#1c1917'; ctx.strokeRect(-l * .55, -w + 5, l * .65, w * 2 - 10);
-            } else {
-              sh(); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-l, -w * .8); ctx.lineTo(l - w * 1.4, -w); ctx.quadraticCurveTo(l - w * .3, -w * .7, l, 0);
-              ctx.quadraticCurveTo(l - w * .3, w * .7, l - w * 1.4, w); ctx.lineTo(-l, w * .8); ctx.closePath(); ctx.fill(); nosh(); ctx.stroke();
-              ctx.save(); ctx.clip(); ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1; ctx.beginPath(); for (let x = -l; x < l; x += 6) { ctx.moveTo(x, -w); ctx.lineTo(x, w); } ctx.stroke(); ctx.restore();
-              ctx.fillStyle = dead ? '#25221f' : '#8a8f93'; ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 1.5;
-              ctx.fillRect(-l * .2, -w * .38, l * .4, w * .76); ctx.strokeRect(-l * .2, -w * .38, l * .4, w * .76);
-              ctx.fillStyle = '#0b1a2a'; ctx.fillRect(l * .17, -w * .3, 3, w * .6);
-            }
-            ctx.restore();
-            ctx.save(); ctx.globalAlpha = 1 - sk * .9; this.weaponSystems.forEach(ws => ws.draw(ctx)); ctx.restore();
-            if (!this.isPlayer && !dead) {
-              const bx = this.x - 20, by = this.y - h.size.w / 2 - 20;
-              ctx.fillStyle = '#1c1917'; ctx.fillRect(bx, by, 40, 6); ctx.fillStyle = '#ef4444'; ctx.fillRect(bx, by, 40 * (this.hp / this.maxHp), 6);
-              if (this.flood > 0.01) { ctx.fillStyle = '#38bdf8'; ctx.fillRect(bx, by + 7, 40 * this.flood, 3); }
-            }
-          }
-        }
+  die(cause) {
+    if (this.dead) return;
+    this.hp = 0; this.dead = cause || 'hp'; this.deadT = 0;
+    const big = Math.max(40, this.hull.size.l);
+    if (cause === 'sunk') splash(this.x, this.y, big * .6);
+    else if (cause === 'crew') createExplosion(this.x, this.y, 12, '#888', 8);
+    else createExplosion(this.x, this.y, big * (cause === 'ammo' ? 1.8 : 1), '#f97316', cause === 'ammo' ? 60 : 35);
+    const T = {sunk:'КОРАБЛЬ ЗАТОНУЛ', ammo:'ДЕТОНАЦИЯ БОЕКОМПЛЕКТА', crew:'ЭКИПАЖ ВЫБИТ', fire:'СГОРЕЛ', hp:'ТЕХНИКА УНИЧТОЖЕНА'};
+    if (this.isPlayer) { showMessage(T[this.dead]); setTimeout(() => switchMode('garage'), 3500); }
+    else { if (GameState.mode === 'combat' && playerVehicle && playerVehicle.hp > 0) { const b = bounty(this); GameState.pp += b; savePP(); showMessage('Уничтожен: +' + b + ' PP'); }
+      setTimeout(() => { if (GameState.mode === 'combat') createTarget(); }, 4000); }
 
-        class Projectile {
-          constructor(x, y, angle, data, team, owner) {
-            angle += (Math.random() - .5) * 2 * ((SPREAD[data.id] || 0) + Math.abs(owner.fwdSpeed || 0) * .0022 + Math.abs(owner.yaw || 0) * .01);
-            this.x = x; this.y = y; this.angle = angle; this.data = data; this.team = team; this.owner = owner;
-            this.v = data.type === 'missile' ? data.vel * .35 : data.vel;
-            this.vx = Math.cos(angle) * this.v; this.vy = Math.sin(angle) * this.v;
-            this.active = true; this.age = 0; this.life = data.range / data.vel + .2; this.trail = [];
-          }
-          update(dt) {
-            const d = this.data; this.age += dt;
-            this.x += this.vx * dt; this.y += this.vy * dt;
-            this.trail.push({x: this.x, y: this.y}); if (this.trail.length > 14) this.trail.shift();
-            this.life -= dt; if (this.life <= 0) this.active = false;
+    // Синхронизация смерти
+    if (this.isPlayer && myPlayerId) {
+        socket.emit('playerDeath', { id: myPlayerId, cause });
+    }
+  }
 
-            // Проверка попадания
-            for (const e of [...GameState.entities, ...remotePlayers.values()]) {
-              if (!(e instanceof Vehicle) && !e.isRemote) continue;
-              if (e.hp <= 0 || !e.active || e.team === this.team) continue;
-              const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
-              if (dx * dx + dy * dy > L * L) continue;
-              const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
-              if (Math.abs(lx) < L / 2 + 1 && Math.abs(ly) < e.hull.size.w / 2 + 1) {
-                e.takeDamage(d.dmg, d.pen, this.x, this.y, this.angle);
-                this.blast(); this.active = false; return true;
-              }
-            }
-          }
-          blast() {
-            const d = this.data;
-            createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
-          }
-          draw(ctx) {
-            const d = this.data;
-            if (this.trail.length > 1) {
-              ctx.globalCompositeOperation = 'lighter'; ctx.beginPath(); ctx.moveTo(this.trail[0].x, this.trail[0].y);
-              for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
-              ctx.strokeStyle = d.color; ctx.globalAlpha = 0.6; ctx.lineWidth = 3; ctx.stroke(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-            }
-            ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
-            ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.2, 14, 2.4);
-            ctx.restore();
-          }
-        }
+  wreck(dt) {
+    this.deadT += dt;
+    this.vx *= Math.exp(-1.5 * dt); this.vy *= Math.exp(-1.5 * dt); this.x += this.vx * PX * dt; this.y += this.vy * PX * dt;
+    const r = Math.random();
+    if (this.dead === 'sunk') { if (r < .3) P(this.x + (Math.random() - .5) * 40, this.y + (Math.random() - .5) * 40, 0, 0, 1, 'rgba(200,230,255,.6)', 3, {grow: 8}); }
+    else if (this.deadT < 18 && this.dead !== 'crew') {
+      if (r < .5) P(this.x + (Math.random() - .5) * 30, this.y + (Math.random() - .5) * 30, 0, 0, 2, 'rgba(25,23,21,.5)', 5, {grow: 10, rise: 22});
+      if (r < .25) P(this.x + (Math.random() - .5) * 24, this.y + (Math.random() - .5) * 24, 0, 0, .5, '#f97316', 5, {add: true, rise: 25, grow: -6});
+    }
+    if (this.deadT > (this.dead === 'sunk' ? 7 : 25)) this.active = false;
+  }
 
-        class Particle {
-          constructor(x, y, vx, vy, life, color, size, o = {}) {
-            Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false}, o);
-          }
-          update(dt) {
-            this.x += this.vx * dt; this.y += this.vy * dt - this.rise * dt; this.life -= dt;
-            const d = Math.pow(this.drag, dt * 60); this.vx *= d; this.vy *= d; this.size = Math.max(0, this.size + this.grow * dt);
-          }
-          draw(ctx) {
-            const a = Math.max(0, this.life / this.maxLife); ctx.globalAlpha = a;
-            if (this.add) ctx.globalCompositeOperation = 'lighter';
-            if (this.ring) { ctx.strokeStyle = this.color; ctx.lineWidth = 1 + 3 * a; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, 6.3); ctx.stroke(); }
-            else { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(.1, this.size), 0, 6.3); ctx.fill(); }
-            ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-          }
-        }
+  draw(ctx) {
+    const h = this.hull, dead = this.hp <= 0, l = h.size.l / 2, w = h.size.w / 2, t = performance.now() / 1000, type = h.drawType;
+    const sk = this.dead === 'sunk' ? Math.min(1, this.deadT / 6) : 0;
+    const pal = dead ? ['#33302b', '#1a1816'] : (this.team === 1 ? ['#7ea03a', '#46661f'] : ['#b84a3a', '#6a2219']);
+    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.globalAlpha = 1 - sk * .9;
+    if (!dead) ctx.scale(1, 1 - this.flood * .1);
+    const g = ctx.createLinearGradient(0, -w, 0, w); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
+    const sh = () => { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 9; ctx.shadowOffsetX = 6; ctx.shadowOffsetY = 8; };
+    const nosh = () => { ctx.shadowColor = 'transparent'; };
+    ctx.lineJoin = 'round'; ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 2;
+    if (type === 'tank') {
+      const off = (this.dist * PX) % 7;
+      sh(); ctx.fillStyle = '#16130f'; for (const s of [-1, 1]) ctx.fillRect(-l - 3, s * (w - 3) - 6, l * 2 + 6, 12);
+      nosh(); ctx.strokeStyle = '#3d372e'; ctx.lineWidth = 1.5; ctx.beginPath();
+      for (const s of [-1, 1]) for (let x = -l - 3 + off; x < l + 3; x += 7) { ctx.moveTo(x, s * (w - 3) - 6); ctx.lineTo(x, s * (w - 3) + 6); }
+      ctx.stroke(); ctx.fillStyle = '#625a4d';
+      for (const s of [-1, 1]) for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(-l + 6 + i * (l * 2 - 12) / 5, s * (w - 3), 3.4, 0, 6.3); ctx.fill(); }
+      ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 2; ctx.fillStyle = g; ctx.beginPath();
+      ctx.moveTo(-l, -w + 8); ctx.lineTo(-l + 8, -w + 4); ctx.lineTo(l - 14, -w + 4); ctx.lineTo(l, -w + 12); ctx.lineTo(l, w - 12); ctx.lineTo(l - 14, w - 4); ctx.lineTo(-l + 8, w - 4); ctx.lineTo(-l, w - 8);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.beginPath(); ctx.moveTo(l - 14, -w + 5); ctx.lineTo(l - 14, w - 5); ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); for (let i = 0; i < 5; i++) { const x = -l + 8 + i * 4; ctx.moveTo(x, -w + 10); ctx.lineTo(x, w - 10); } ctx.stroke();
+    } else if (type === 'car') {
+      sh(); ctx.fillStyle = '#16130f';
+      for (const sx of [-l * .62, l * .62]) for (const s of [-1, 1]) ctx.fillRect(sx - 6, s * (w - 1) - 3, 12, 6);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-l, -w + 3); ctx.lineTo(l * .7, -w + 3); ctx.lineTo(l, -w * .5); ctx.lineTo(l, w * .5); ctx.lineTo(l * .7, w - 3); ctx.lineTo(-l, w - 3);
+      ctx.closePath(); ctx.fill(); nosh(); ctx.stroke();
+      ctx.fillStyle = 'rgba(120,190,230,.55)'; ctx.fillRect(l * .15, -w + 5, l * .25, w * 2 - 10);
+      ctx.strokeStyle = '#1c1917'; ctx.strokeRect(-l * .55, -w + 5, l * .65, w * 2 - 10);
+    } else if (type === 'hover') {
+      sh(); ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.ellipse(0, 0, l, w, 0, 0, 6.3); ctx.fill(); nosh();
+      ctx.strokeStyle = '#3d372e'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, l * .8, w * .78, 0, 0, 6.3); ctx.fill(); ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.strokeStyle = 'rgba(220,220,220,.5)'; ctx.lineWidth = 2;
+      for (const s of [-1, 1]) { ctx.save(); ctx.translate(-l * .6, s * w * .35); ctx.rotate(dead ? 0 : t * 40); ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(9, 0); ctx.moveTo(0, -9); ctx.lineTo(0, 9); ctx.stroke(); ctx.restore(); }
+    } else {
+      sh(); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-l, -w * .8); ctx.lineTo(l - w * 1.4, -w); ctx.quadraticCurveTo(l - w * .3, -w * .7, l, 0);
+      ctx.quadraticCurveTo(l - w * .3, w * .7, l - w * 1.4, w); ctx.lineTo(-l, w * .8); ctx.closePath(); ctx.fill(); nosh(); ctx.stroke();
+      ctx.save(); ctx.clip(); ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1; ctx.beginPath(); for (let x = -l; x < l; x += 6) { ctx.moveTo(x, -w); ctx.lineTo(x, w); } ctx.stroke(); ctx.restore();
+      ctx.fillStyle = dead ? '#25221f' : '#8a8f93'; ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 1.5;
+      ctx.fillRect(-l * .2, -w * .38, l * .4, w * .76); ctx.strokeRect(-l * .2, -w * .38, l * .4, w * .76);
+      ctx.fillStyle = '#0b1a2a'; ctx.fillRect(l * .17, -w * .3, 3, w * .6);
+      if (type === 'ship') { ctx.fillStyle = '#3a3f44'; ctx.beginPath(); ctx.arc(-l * .38, 0, w * .28, 0, 6.3); ctx.fill(); ctx.stroke(); }
+    }
+    drawArmor(this, ctx, l, w, dead);
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = 1 - sk * .9; this.weaponSystems.forEach(ws => ws.draw(ctx)); ctx.restore();
+    if (!this.isPlayer && !dead) {
+      const bx = this.x - 20, by = this.y - h.size.w / 2 - 20;
+      ctx.fillStyle = '#1c1917'; ctx.fillRect(bx, by, 40, 6); ctx.fillStyle = '#ef4444'; ctx.fillRect(bx, by, 40 * (this.hp / this.maxHp), 6);
+      if (this.flood > .01) { ctx.fillStyle = '#38bdf8'; ctx.fillRect(bx, by + 7, 40 * this.flood, 3); }
+    }
+  }
+}
+function l(h) { return h.size.l / 2; }
+
+class Projectile {
+  constructor(x, y, angle, data, team, owner) {
+    angle += (Math.random() - .5) * 2 * ((SPREAD[data.id] || 0) + Math.abs(owner.fwdSpeed || 0) * .0022 + Math.abs(owner.yaw || 0) * .01);
+    this.x = x; this.y = y; this.angle = angle; this.data = data; this.team = team; this.owner = owner;
+    this.v = data.type === 'missile' ? data.vel * .35 : data.vel;
+    this.vx = Math.cos(angle) * this.v; this.vy = Math.sin(angle) * this.v;
+    this.active = true; this.age = 0; this.life = data.range / data.vel + .2; this.trail = [];
+    this.target = null;
+    if (data.type === 'missile') this.target = owner.isPlayer ? {type: 'mouse'} : {type: 'entity', entity: playerVehicle};
+    if (data.type === 'ballistic') {
+      const Lk = GameState.lock;
+      this.tgt = owner.isPlayer ? (Lk ? (Lk.type === 'entity' ? {entity: Lk.entity} : {x: Lk.x, y: Lk.y}) : {x: GameState.mouse.worldX, y: GameState.mouse.worldY}) : {entity: playerVehicle};
+      let px = this.tgt.entity ? this.tgt.entity.x : this.tgt.x, py = this.tgt.entity ? this.tgt.entity.y : this.tgt.y, dd = Math.hypot(px - x, py - y);
+      if (dd > data.range) { px = x + (px - x) / dd * data.range; py = y + (py - y) / dd * data.range; dd = data.range; }
+      this.sx = x; this.sy = y; this.dest = {x: px, y: py}; this.T = Math.max(2.6, dd / data.vel); this.u = 0; this.dispX = x; this.dispY = y;
+      for (let i = 0; i < 14; i++) P(x, y, (Math.random() - .5) * 60, (Math.random() - .5) * 60, 1.5, 'rgba(230,230,230,.6)', 6, {grow: 14, drag: .96});
+    }
+  }
+  update(dt) {
+    if (this.data.type === 'ballistic') { this.updateBallistic(dt); return; }
+    const d = this.data; this.age += dt;
+    if (d.type === 'missile') {
+      let tx, ty, has = false;
+      if (this.target.type === 'mouse') { const Lk = GameState.lock; if (Lk && Lk.type === 'entity' && Lk.entity.hp > 0) { tx = Lk.entity.x; ty = Lk.entity.y; } else if (Lk && Lk.type === 'point') { tx = Lk.x; ty = Lk.y; } else { tx = GameState.mouse.worldX; ty = GameState.mouse.worldY; } has = true;
+        if (Lk && Lk.type === 'point' && Math.hypot(tx - this.x, ty - this.y) < 16) { areaDamage(this.x, this.y, 60, d.dmg, d.pen, this.team); this.blast(); this.active = false; return; } }
+      else if (this.target.entity && this.target.entity.hp > 0) { tx = this.target.entity.x; ty = this.target.entity.y; has = true; }
+      if (has) {
+        let diff = Math.atan2(ty - this.y, tx - this.x) - this.angle; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        const tr = 2.0 * dt; this.angle += Math.abs(diff) < tr ? diff : Math.sign(diff) * tr;
+      }
+      this.v = Math.min(d.vel, this.v + d.vel * 1.2 * dt);
+      this.vx = Math.cos(this.angle) * this.v; this.vy = Math.sin(this.angle) * this.v;
+      P(this.x, this.y, 0, 0, 1.2, 'rgba(210,210,210,.45)', 2.5, {grow: 5});
+      P(this.x, this.y, 0, 0, .12, '#fbbf24', 3, {add: true});
+    } else if (d.type === 'rocket') {
+      P(this.x, this.y, 0, 0, .8, 'rgba(200,200,200,.35)', 2, {grow: 4}); P(this.x, this.y, 0, 0, .1, '#fbbf24', 2.5, {add: true});
+    }
+    const n = Math.ceil(this.v * dt / 6), sdt = dt / n; // непрерывная проверка попаданий
+    for (let i = 0; i < n; i++) { this.x += this.vx * sdt; this.y += this.vy * sdt; if (this.hit()) return; }
+    this.trail.push({x: this.x, y: this.y}); if (this.trail.length > (d.type === 'kinetic' ? 6 : 14)) this.trail.shift();
+    this.life -= dt; if (this.life <= 0) this.impact();
+  }
+  updateBallistic(dt) {
+    const d = this.data; this.age += dt; const u = Math.min(1, this.age / this.T); this.u = u;
+    if (this.tgt.entity && this.tgt.entity.hp > 0 && u < .8) this.dest = {x: this.tgt.entity.x, y: this.tgt.entity.y};
+    const e = u * u * u; this.x = this.sx + (this.dest.x - this.sx) * e; this.y = this.sy + (this.dest.y - this.sy) * e;
+    const nx = this.x, ny = this.y - Math.sin(Math.PI * Math.pow(u, .55)) * 110;
+    this.angle = Math.atan2(ny - this.dispY, nx - this.dispX); this.dispX = nx; this.dispY = ny;
+    P(nx, ny, 0, 0, .9, 'rgba(220,220,220,.5)', 3, {grow: 6}); P(nx, ny, 0, 0, .1, '#fbbf24', 4, {add: true});
+    if (u >= 1) {
+      areaDamage(this.dest.x, this.dest.y, d.radius, d.dmg, d.pen, this.team);
+      createExplosion(this.dest.x, this.dest.y, d.radius * .55, '#f97316', 50); GameState.shake = Math.max(GameState.shake || 0, 14);
+      if (hAt(this.dest.x, this.dest.y) <= 0) splash(this.dest.x, this.dest.y, d.radius * .5); else dust(this.dest.x, this.dest.y, d.radius * .3);
+      this.active = false;
+    }
+  }
+  hit() {
+    const d = this.data;
+    for (const e of GameState.entities) {
+      if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active || e.team === this.team) continue;
+      const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
+      if (dx * dx + dy * dy > L * L) continue;
+      const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
+      if (Math.abs(lx) < L / 2 + 1 && Math.abs(ly) < e.hull.size.w / 2 + 1) {
+        const f = d.type === 'kinetic' ? 1 - .3 * Math.min(1, this.age * d.vel / d.range) : 1; // потеря пробития с дистанцией
+        e.takeDamage(d.dmg * (d.type === 'kinetic' ? .7 + .3 * f : 1), d.pen * f, this.x, this.y, this.angle);
+        this.blast(); this.active = false; return true;
+      }
+    }
+    return false;
+  }
+  blast() {
+    const d = this.data;
+    if (d.type === 'kinetic') { for (let i = 0; i < 5; i++) P(this.x, this.y, (Math.random() - .5) * 220, (Math.random() - .5) * 220, .3, '#fde68a', 1.5, {add: true}); P(this.x, this.y, 0, 0, .6, 'rgba(60,55,50,.5)', 3, {grow: 14, rise: 15}); }
+    else createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
+  }
+  impact() {
+    this.active = false;
+    if (hAt(this.x, this.y) <= 0) splash(this.x, this.y, this.data.type === 'kinetic' ? Math.min(40, 8 + this.data.dmg * .06) : 30);
+    else if (this.data.type === 'kinetic') dust(this.x, this.y, 8 + this.data.dmg * .03);
+    else createExplosion(this.x, this.y, 24, '#f97316', 12);
+  }
+  draw(ctx) {
+    const d = this.data;
+    if (d.type === 'ballistic') {
+      ctx.save(); ctx.strokeStyle = 'rgba(239,68,68,.75)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.arc(this.dest.x, this.dest.y, d.radius, 0, 6.3); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(this.x, this.y, 5, 3, 0, 0, 6.3); ctx.fill();
+      const sc = 1 + Math.sin(Math.PI * Math.pow(this.u, .55)) * .8; ctx.translate(this.dispX, this.dispY); ctx.rotate(this.angle); ctx.scale(sc, sc);
+      ctx.fillStyle = '#e7e5e4'; ctx.fillRect(-10, -3, 20, 6); ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(10, -3); ctx.lineTo(16, 0); ctx.lineTo(10, 3); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(-10, -5.5, 4, 11);
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(-10, -2.5); ctx.lineTo(-20 - Math.random() * 8, 0); ctx.lineTo(-10, 2.5); ctx.fill();
+      ctx.restore(); return;
+    }
+    if (this.trail.length > 1) {
+      ctx.globalCompositeOperation = 'lighter'; ctx.beginPath(); ctx.moveTo(this.trail[0].x, this.trail[0].y);
+      for (let i = 1; i < this.trail.length; i++) ctx.lineTo(this.trail[i].x, this.trail[i].y);
+      ctx.strokeStyle = d.color; ctx.globalAlpha = .6; ctx.lineWidth = d.type === 'kinetic' ? 2 : 3; ctx.stroke(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+    if (d.type === 'missile' || d.type === 'rocket') {
+      ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -2.5, 12, 5); ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(12, -2.5); ctx.lineTo(16, 0); ctx.lineTo(12, 2.5); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(0, -4.5, 3, 9);
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-8 - Math.random() * 5, 0); ctx.lineTo(0, 2); ctx.fill();
+    } else { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.2, 14, 2.4); }
+    ctx.restore();
+  }
+}
+
+class Particle {
+  constructor(x, y, vx, vy, life, color, size, o = {}) {
+    Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false}, o);
+  }
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt - this.rise * dt; this.life -= dt;
+    const d = Math.pow(this.drag, dt * 60); this.vx *= d; this.vy *= d; this.size = Math.max(0, this.size + this.grow * dt);
+  }
+  draw(ctx) {
+    const a = Math.max(0, this.life / this.maxLife); ctx.globalAlpha = a;
+    if (this.add) ctx.globalCompositeOperation = 'lighter';
+    if (this.ring) { ctx.strokeStyle = this.color; ctx.lineWidth = 1 + 3 * a; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, 6.3); ctx.stroke(); }
+    else { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(.1, this.size), 0, 6.3); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+}
 
         class FloatingText {
             constructor(x, y, text, color) {
@@ -1236,15 +1470,21 @@
             }
         }
 
-        function P(x,y,vx,vy,l,c,s,o){GameState.particles.push(new Particle(x,y,vx,vy,l,c,s,o));}
-        function createExplosion(x,y,r,color,count){
-          for(let i=0;i<count;i++){const a=Math.random()*6.283,sp=Math.random()*r*3.2;
-            P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.25+Math.random()*.5,i%3?'#f97316':'#fde047',2+Math.random()*r*.12,{add:true,grow:r*.3});}
-          for(let i=0;i<count*.6;i++){const a=Math.random()*6.283,sp=Math.random()*r*1.2;
-            P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,1.2+Math.random()*1.6,'rgba(40,36,33,.5)',3+Math.random()*r*.1,{grow:r*.25,rise:14,drag:.97});}
-          for(let i=0;i<count*.4;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*r*6,Math.sin(a)*r*6,.4,'#fff7ae',1.5,{drag:.9,add:true});}
-          P(x,y,0,0,.4,'rgba(255,220,150,.8)',r*.3,{ring:true,grow:r*5});
-        }
+function P(x,y,vx,vy,l,c,s,o){GameState.particles.push(new Particle(x,y,vx,vy,l,c,s,o));}
+function createExplosion(x,y,r,color,count){
+  for(let i=0;i<count;i++){const a=Math.random()*6.283,sp=Math.random()*r*3.2;
+    P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.25+Math.random()*.5,i%3?'#f97316':'#fde047',2+Math.random()*r*.12,{add:true,grow:r*.3});}
+  for(let i=0;i<count*.6;i++){const a=Math.random()*6.283,sp=Math.random()*r*1.2;
+    P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,1.2+Math.random()*1.6,'rgba(40,36,33,.5)',3+Math.random()*r*.1,{grow:r*.25,rise:14,drag:.97});}
+  for(let i=0;i<count*.4;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*r*6,Math.sin(a)*r*6,.4,'#fff7ae',1.5,{drag:.9,add:true});}
+  P(x,y,0,0,.4,'rgba(255,220,150,.8)',r*.3,{ring:true,grow:r*5});
+}
+function splash(x,y,s){
+  for(let i=0;i<10+s*.4;i++){const a=Math.random()*6.283,sp=Math.random()*s*2;P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.5+Math.random()*.6,'rgba(220,240,255,.8)',2+Math.random()*s*.12,{grow:s*.1,rise:20});}
+  P(x,y,0,0,.8,'rgba(255,255,255,.7)',s*.2,{ring:true,grow:s*3});
+}
+function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*s,Math.sin(a)*s,.8,'rgba(120,100,60,.5)',3+Math.random()*s*.2,{grow:s*.3,drag:.92});}}
+
         function createMessage(x, y, text, color) {
             GameState.particles.push(new FloatingText(x, y, text, color));
         }
@@ -1260,19 +1500,29 @@
             
             window.addEventListener('keydown', e => { GameState.keys[e.key] = true;
                 if (e.key === '+' || e.key === '=') GameState.zoomT = Math.min(2.5, (GameState.zoomT || 1) * 1.15);
-                if (e.key === '-') GameState.zoomT = Math.max(.25, (GameState.zoomT || 1) / 1.15); });
+                if (e.key === '-') GameState.zoomT = Math.max(.25, (GameState.zoomT || 1) / 1.15);
+                if ('xXчЧ'.includes(e.key)) GameState.lock = null;
+                if ('rRкК'.includes(e.key)) startRepair(); });
             window.addEventListener('keyup', e => GameState.keys[e.key] = false);
             
             canvas.addEventListener('mousemove', e => {
                 const rect = canvas.getBoundingClientRect();
                 GameState.mouse.x = e.clientX - rect.left;
                 GameState.mouse.y = e.clientY - rect.top;
+                // Convert screen to world space
                 GameState.mouse.worldX = (GameState.mouse.x - GameState.camera.x) / GameState.camera.zoom;
                 GameState.mouse.worldY = (GameState.mouse.y - GameState.camera.y) / GameState.camera.zoom;
             });
             canvas.addEventListener('mousedown', () => GameState.mouse.down = true);
             canvas.addEventListener('mouseup', () => GameState.mouse.down = false);
             canvas.addEventListener('wheel', e => { e.preventDefault(); GameState.zoomT = Math.max(.25, Math.min(2.5, (GameState.zoomT || 1) * Math.exp(-e.deltaY * .0012))); }, {passive: false});
+            canvas.addEventListener('contextmenu', e => {
+                e.preventDefault(); if (GameState.mode !== 'combat') return;
+                const mx = GameState.mouse.worldX, my = GameState.mouse.worldY; let best = null, bd = 1e9;
+                GameState.entities.forEach(en => { if (en instanceof Vehicle && en.team !== 1 && en.hp > 0) { const d = Math.hypot(en.x - mx, en.y - my); if (d < Math.max(en.hull.size.l * .7, 40 / GameState.camera.zoom) && d < bd) { bd = d; best = en; } } });
+                GameState.lock = best ? {type: 'entity', entity: best} : {type: 'point', x: mx, y: my};
+                showMessage(best ? 'Цель захвачена: ' + best.hull.name : 'Точка захвачена');
+            });
 
             document.getElementById('btn-deploy').addEventListener('click', () => switchMode('combat'));
             document.getElementById('btn-garage').addEventListener('click', () => switchMode('garage'));
@@ -1283,6 +1533,27 @@
         }
 
         function switchMode(mode) {
+            if (mode === 'combat' && GameState.mode === 'garage') {
+                if (GameState.pp < SORTIE) { showMessage('Недостаточно PP для вылета!'); return; }
+                GameState.pp -= SORTIE; GameState.kit = false;
+                if (GameState.repairBuy) { if (GameState.pp >= REPAIR) { GameState.pp -= REPAIR; GameState.kit = true; } else showMessage('Не хватает PP на ремонт'); }
+                savePP();
+                Object.keys(currentConfig.weapons).forEach(k => { const w = currentConfig.weapons[k]; if (w && (w.minMass || 0) > currentConfig.hull.mass) delete currentConfig.weapons[k]; });
+                
+                // Присоединяемся к мультиплееру
+                const sp0 = findSpawn(currentConfig.hull, null);
+                socket.emit('joinGame', {
+                    x: sp0.x,
+                    y: sp0.y,
+                    angle: 0,
+                    hull: currentConfig.hull,
+                    hp: currentConfig.hull.hp,
+                    maxHp: currentConfig.hull.hp,
+                    team: 1,
+                    config: currentConfig
+                });
+            }
+            if (mode === 'garage' && GameState.pp < SORTIE) { GameState.pp = SORTIE; savePP(); showMessage('Аварийный резерв: ' + SORTIE + ' PP'); }
             GameState.mode = mode;
             GameState.entities = [];
             GameState.projectiles = [];
@@ -1301,7 +1572,7 @@
                 document.getElementById('btn-deploy').style.display = 'block';
                 document.getElementById('ui-panel').style.display = 'flex';
                 
-                GameState.camera = { x: canvas.width/2, y: canvas.height/2, zoom: 1 }; GameState.zoomT = 1;
+                GameState.camera = { x: canvas.width/2, y: canvas.height/2, zoom: 1 }; GameState.zoomT = 1; GameState.lock = null;
                 createGarageVehicle();
             } else if (mode === 'combat') {
                 modeInd.innerText = 'РЕЖИМ: ПОЛИГОН';
@@ -1313,43 +1584,85 @@
                 
                 resizeCanvas();
                 
+                // Spawn based on terrain
                 const sp0 = findSpawn(currentConfig.hull, null);
                 playerVehicle = new Vehicle(sp0.x, sp0.y, currentConfig, true, 1);
                 GameState.camera.x = canvas.width / 2 - sp0.x; GameState.camera.y = canvas.height / 2 - sp0.y;
                 GameState.entities.push(playerVehicle);
                 
+                // Боты остаются на клиенте
+                createTarget(); createTarget();
                 updateHUD();
-                showMessage("Многопользовательский режим. WASD - движение, ЛКМ - огонь.");
+                showMessage("Остров в океане. ПКМ - захват цели, колесо - зум. Мультиплеер активен.");
             }
         }
 
         function createGarageVehicle() {
+            refreshPP();
             playerVehicle = new Vehicle(0, 0, currentConfig, false, 1);
             playerVehicle.angle = -Math.PI / 6;
             GameState.entities = [playerVehicle];
         }
 
-        function updateHUD() {
-          if (!playerVehicle || GameState.mode !== 'combat') return;
-          const v = playerVehicle, hpPct = Math.max(0, v.hp / v.maxHp * 100), pc = x => Math.round(x * 100);
-          const hpBar = document.getElementById('hp-bar');
-          hpBar.style.width = `${hpPct}%`;
-          hpBar.style.backgroundColor = hpPct > 50 ? '#22c55e' : (hpPct > 25 ? '#f59e0b' : '#ef4444');
-          document.getElementById('hud-extra').innerHTML = `Скорость: <b style="color:#fbbf24">${Math.abs(v.fwdSpeed * 3.6).toFixed(0)} км/ч</b><br>Двигатель: ${pc(v.mods.engine)}% · Ход: ${pc(v.mods.tracks)}%<br>Экипаж: ${pc(v.mods.crew)}%` +
-            (v.flood > 0.01 ? `<br><span style="color:#38bdf8">Затопление: ${pc(v.flood)}%</span>` : '') + (v.fire ? '<br><span style="color:#ef4444">ПОЖАР!</span>' : '');
+        function createTarget() {
+            // Find a random config matching player's terrain preference roughly
+            const terrain = currentConfig.hull.terrain === 'water' ? 'water' : 'land';
+            const possibleHulls = DB.hulls.filter(h => h.terrain === terrain || h.terrain === 'amphibious');
+            
+            const eHull = possibleHulls[Math.floor(Math.random() * possibleHulls.length)];
+            const eConfig = { hull: eHull, engine: DB.engines[0], weapons: {} };
+            
+            eHull.mounts.forEach(m => {
+                const possibleWeps = DB.weapons.filter(w => w.size <= m.size && w.type !== 'ballistic' && (w.minMass || 0) <= eHull.mass);
+                eConfig.weapons[m.id] = possibleWeps[Math.floor(Math.random() * possibleWeps.length)];
+            });
+
+            const pv = playerVehicle && playerVehicle.hp > 0 ? playerVehicle : null, sp = findSpawn(eHull, pv, 900, 1700) || findSpawn(eHull, null);
+            const target = new Vehicle(sp.x, sp.y, eConfig, false, 2);
+            GameState.entities.push(target);
         }
 
-        function drawMap2(ctx) {
-          const z = GameState.camera.zoom, L = -GameState.camera.x / z - 40, R = (canvas.width - GameState.camera.x) / z + 40, T = -GameState.camera.y / z - 40, B = (canvas.height - GameState.camera.y) / z + 40;
-          ctx.fillStyle = '#06203f'; ctx.fillRect(L, T, R - L, B - T); ctx.imageSmoothingEnabled = true; ctx.drawImage(TCV, -WS, -WS, 2 * WS, 2 * WS);
-        }
+function updateHUD() {
+  if (!playerVehicle || GameState.mode !== 'combat') return;
+  refreshPP();
+  const v = playerVehicle, hpPct = Math.max(0, v.hp / v.maxHp * 100), pc = x => Math.round(x * 100);
+  const hpBar = document.getElementById('hp-bar');
+  hpBar.style.width = `${hpPct}%`;
+  hpBar.style.backgroundColor = hpPct > 50 ? '#22c55e' : (hpPct > 25 ? '#f59e0b' : '#ef4444');
+  document.getElementById('hud-extra').innerHTML = `Скорость: <b style="color:#fbbf24">${Math.abs(v.fwdSpeed * 3.6).toFixed(0)} км/ч</b><br>Двигатель: ${pc(v.mods.engine)}% · Ход: ${pc(v.mods.tracks)}%<br>Экипаж: ${pc(v.mods.crew)}%` +
+    (v.flood > 0.01 ? `<br><span style="color:#38bdf8">Затопление: ${pc(v.flood)}%</span>` : '') + (v.fire ? '<br><span style="color:#ef4444">ПОЖАР!</span>' : '') +
+    (v.repairT > 0 ? '<br><span style="color:#4ade80">РЕМОНТ: ' + v.repairT.toFixed(1) + ' с</span>' : (GameState.kit ? '<br>R - ремонт (готов)' : ''));
+}
 
-        function drawGarage(ctx){
-          const g=ctx.createRadialGradient(0,0,10,0,0,460);g.addColorStop(0,'#443e34');g.addColorStop(1,'rgba(28,25,23,0)');
-          ctx.fillStyle=g;ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
-          ctx.strokeStyle='rgba(251,191,36,.35)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,200,0,6.3);ctx.stroke();
-          ctx.setLineDash([4,10]);ctx.beginPath();ctx.arc(0,0,250,0,6.3);ctx.stroke();ctx.setLineDash([]);
-        }
+function makePat(base,dots,sz=256){const c=document.createElement('canvas');c.width=c.height=sz;const g=c.getContext('2d');g.fillStyle=base;g.fillRect(0,0,sz,sz);
+  for(let i=0;i<350;i++){g.fillStyle=dots[i%dots.length];g.globalAlpha=.22;const x=Math.random()*sz,y=Math.random()*sz,r=1+Math.random()*8;
+    for(const ox of[-sz,0,sz])for(const oy of[-sz,0,sz]){g.beginPath();g.arc(x+ox,y+oy,r,0,6.3);g.fill();}}
+  return c;}
+const PAT={};
+function drawMap(ctx){
+  if(!PAT.g){PAT.g=ctx.createPattern(makePat('#2c3b17',['#3f5622','#1c2a0e','#566a2e']),'repeat');
+    PAT.s=ctx.createPattern(makePat('#6b5c32',['#85763f','#4d4223']),'repeat');
+    PAT.w=ctx.createPattern(makePat('#0d2b4d',['#15416d','#08203a','#1f5a8f']),'repeat');}
+  const z=GameState.camera.zoom,L=-GameState.camera.x/z-40,R=(canvas.width-GameState.camera.x)/z+40,T=-GameState.camera.y/z-40,B=(canvas.height-GameState.camera.y)/z+40,t=performance.now()/1000;
+  if(L<-24){ctx.fillStyle=PAT.g;ctx.fillRect(L,T,Math.min(R,-24)-L,B-T);}
+  ctx.fillStyle=PAT.s;ctx.fillRect(-24,T,24,B-T);
+  if(R>0){const x0=Math.max(L,0);ctx.fillStyle=PAT.w;ctx.fillRect(x0,T,R-x0,B-T);
+    const sg=ctx.createLinearGradient(0,0,90,0);sg.addColorStop(0,'rgba(90,190,180,.65)');sg.addColorStop(1,'rgba(90,190,180,0)');
+    ctx.fillStyle=sg;ctx.fillRect(0,T,90,B-T);
+    ctx.strokeStyle='rgba(255,255,255,.14)';ctx.lineWidth=1.5;ctx.beginPath();
+    for(let gx=Math.floor(x0/70)*70;gx<R;gx+=70)for(let gy=Math.floor(T/50)*50;gy<B;gy+=50){
+      const ox=Math.sin(gx*.13+gy*.07+t*1.3)*10,oy=Math.cos(gx*.05+t)*4;ctx.moveTo(gx+ox,gy+oy);ctx.quadraticCurveTo(gx+ox+10,gy+oy-4,gx+ox+20,gy+oy);}
+    ctx.stroke();}
+  ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=3;ctx.beginPath();
+  for(let y=Math.floor(T/10)*10;y<B;y+=10){const x=Math.sin(y*.05+t*1.6)*3+1;y===Math.floor(T/10)*10?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.stroke();
+}
+function drawGarage(ctx){
+  const g=ctx.createRadialGradient(0,0,10,0,0,460);g.addColorStop(0,'#443e34');g.addColorStop(1,'rgba(28,25,23,0)');
+  ctx.fillStyle=g;ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
+  ctx.strokeStyle='rgba(251,191,36,.35)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,200,0,6.3);ctx.stroke();
+  ctx.setLineDash([4,10]);ctx.beginPath();ctx.arc(0,0,250,0,6.3);ctx.stroke();ctx.setLineDash([]);
+}
 
         function gameLoop(timestamp) {
             if (!GameState.lastTime) GameState.lastTime = timestamp;
@@ -1357,22 +1670,17 @@
             GameState.lastTime = timestamp;
             if (dt > 0.05) dt = 0.05;
 
+            // Update
             GameState.entities.forEach(e => e.active && e.update(dt));
             GameState.projectiles.forEach(p => p.active && p.update(dt));
             GameState.particles.forEach(p => p.life > 0 && p.update(dt));
 
-            // Обновляем удалённых игроков
-            remotePlayers.forEach(p => {
-                if (p.isRemote) {
-                    // Интерполяция для плавности
-                    // p.x, p.y уже обновляются через socket events
-                }
-            });
-
             GameState.entities = GameState.entities.filter(e => e.active);
+            if (GameState.mode === 'combat') collideVehicles();
             GameState.projectiles = GameState.projectiles.filter(p => p.active);
             GameState.particles = GameState.particles.filter(p => p.life > 0);
 
+            // Camera follow player
             if (GameState.mode === 'combat' && playerVehicle) {
                 const z = GameState.camera.zoom += ((GameState.zoomT || 1) - GameState.camera.zoom) * Math.min(1, dt * 8);
                 const targetCamX = canvas.width/2 - playerVehicle.x * z;
@@ -1380,10 +1688,12 @@
                 GameState.camera.x += (targetCamX - GameState.camera.x) * dt * 5;
                 GameState.camera.y += (targetCamY - GameState.camera.y) * dt * 5;
                 
+                // Update mouse world pos based on new camera
                 GameState.mouse.worldX = (GameState.mouse.x - GameState.camera.x) / GameState.camera.zoom;
                 GameState.mouse.worldY = (GameState.mouse.y - GameState.camera.y) / GameState.camera.zoom;
             }
 
+            // Garage animation
             if (GameState.mode === 'garage' && playerVehicle) {
                 playerVehicle.angle += dt * 0.3;
                 playerVehicle.weaponSystems.forEach(ws => {
@@ -1391,26 +1701,28 @@
                 });
             }
 
+            // Draw
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             ctx.save();
-            ctx.translate(GameState.camera.x, GameState.camera.y);
+            GameState.shake = (GameState.shake || 0) * Math.exp(-6 * dt);
+            ctx.translate(GameState.camera.x + (Math.random() - .5) * GameState.shake, GameState.camera.y + (Math.random() - .5) * GameState.shake);
             ctx.scale(GameState.camera.zoom, GameState.camera.zoom);
 
             if (GameState.mode === 'combat') drawMap2(ctx); else drawGarage(ctx);
 
-            // Рисуем всех сущностей (локальных и удалённых)
+            // Рисуем всех сущностей (локальные + удалённые игроки)
             [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp <= 0).forEach(e => e.draw(ctx));
             [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp > 0).forEach(e => e.draw(ctx));
             
             GameState.particles.forEach(p => p.draw(ctx));
             GameState.projectiles.forEach(p => p.draw(ctx));
+            drawLock(ctx); drawMini();
 
             ctx.restore();
             requestAnimationFrame(gameLoop);
         }
 
-        buildTerrain();
         window.onload = initGame;
     </script>
 </body>
