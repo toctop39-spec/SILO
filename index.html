@@ -679,15 +679,22 @@
                 diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // Normalize
                 
                 const maxTurn = this.data.turn * dt * 5; 
-                if (Math.abs(diff) < maxTurn) this.angle = targetAngle;
-                else this.angle += Math.sign(diff) * maxTurn;
+                const cur = this.blockedAt(this.angle);
+                let dir = this.detour || Math.sign(diff), st = this.detour ? maxTurn : Math.min(Math.abs(diff), maxTurn);
+                if (dir && !cur && this.blockedAt(this.angle + dir * st)) {
+                    // упёрлись в другую пушку: идём в обход, только если путь свободен
+                    if (!this.detour && this.arcFree(targetAngle, -dir)) { this.detour = -dir; dir = -dir; st = maxTurn; }
+                    else { dir = 0; this.detour = 0; }
+                }
+                if (dir && (cur || !this.blockedAt(this.angle + dir * st))) this.angle += dir * st; else this.detour = 0;
+                if (this.detour && Math.abs(diff) < maxTurn * 1.5) this.detour = 0;
 
                 // Reloading
                 if (this.reloadTimer > 0) this.reloadTimer -= dt * Math.max(.2, this.vehicle.mods.crew);
                 if (this.burstIntervalTimer > 0) this.burstIntervalTimer -= dt;
 
                 // Firing logic
-                const aimed = (this.data.type === 'ballistic' || Math.abs(diff) < 0.1) && (this.vehicle.isPlayer || Math.hypot(dx, dy) < this.data.range);
+                const aimed = (this.data.type === 'ballistic' || Math.abs(diff) < 0.1) && (this.vehicle.isPlayer || Math.hypot(dx, dy) < this.data.range) && (!isTriggerPulled || !this.lineBlocked());
                 
                 if (this.data.burst) {
                     // Burst mode
@@ -712,42 +719,39 @@
                 }
             }
 
+            blockedAt(a) { // пересекает ли ствол под углом a другую пушку этой же техники
+                const [p, q] = this.seg(a), hw = this.th / 2;
+                for (const o of this.vehicle.weaponSystems) {
+                    if (o === this || !o.data || o.worldX === undefined) continue;
+                    if (segPtDist(p.x, p.y, q.x, q.y, o.worldX, o.worldY) < o.rad + hw) return true;
+                    const [r, t] = o.seg(o.angle); if (segSegDist(p, q, r, t) < hw + o.th / 2) return true;
+                }
+                return false;
+            }
+            arcFree(to, dir) { // свободна ли дуга от текущего угла до to в направлении dir
+                const T = 6.2832, a = this.angle, rem = dir > 0 ? (((to - a) % T) + T) % T : (((a - to) % T) + T) % T;
+                for (let k = .08; k < rem; k += .08) if (this.blockedAt(a + dir * k)) return false;
+                return !this.blockedAt(to);
+            }
+            lineBlocked() { // линия огня сразу за дулом упирается в свою же пушку
+                const a = this.angle, m = this.reach(), c = Math.cos(a), s = Math.sin(a), p = {x: this.worldX + c * m, y: this.worldY + s * m}, q = {x: p.x + c * 70, y: p.y + s * 70};
+                for (const o of this.vehicle.weaponSystems) {
+                    if (o === this || !o.data || o.worldX === undefined) continue;
+                    if (segPtDist(p.x, p.y, q.x, q.y, o.worldX, o.worldY) < o.rad + 2) return true;
+                    const [r, t] = o.seg(o.angle); if (segSegDist(p, q, r, t) < o.th / 2 + 1) return true;
+                }
+                return false;
+            }
+            get rad() { const w = this.data.barrelW; return this.data.isBox ? w * 1.5 : w * 1.5 + 4; }
+            get th() { const d = this.data; return d.isBox || d.dual ? d.barrelW * 2 : d.barrelW; }
+            reach() { const d = this.data; return d.isBox ? d.barrelW * 1.3 : this.rad + d.length; }
+            seg(a) { const r0 = this.data.isBox ? 0 : this.rad * .6, r1 = this.reach(), c = Math.cos(a), s = Math.sin(a);
+                return [{x: this.worldX + c * r0, y: this.worldY + s * r0}, {x: this.worldX + c * r1, y: this.worldY + s * r1}]; }
+
             fireProjectile() {
+                if (this.blockedAt(this.angle) || this.lineBlocked()) return false; // предохранитель
                 this.recoil = this.data.barrelW; // visual pushback
-                
-                const tipX = this.worldX + Math.cos(this.angle) * this.data.length;
-                const tipY = this.worldY + Math.sin(this.angle) * this.data.length;
-                
-                // Предохранитель от самопопадания - проверяем не смотрит ли пушка на свой же корпус
-                const toCenterX = this.vehicle.x - this.worldX;
-                const toCenterY = this.vehicle.y - this.worldY;
-                const toCenterAngle = Math.atan2(toCenterY, toCenterX);
-                let angleDiff = Math.abs(this.angle - toCenterAngle);
-                angleDiff = Math.abs(Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff))); // Normalize
-                
-                // Если пушка смотрит в сторону своего корпуса (в пределах 45 градусов), не стреляем
-                if (angleDiff < Math.PI / 4) {
-                    return;
-                }
-                
-                // Также проверяем что пушка не смотрит на другие части того же vehicle
-                for (const otherMount of this.vehicle.hull.mounts) {
-                    if (otherMount.id === this.mount.id) continue;
-                    const cosA = Math.cos(this.vehicle.angle);
-                    const sinA = Math.sin(this.vehicle.angle);
-                    const otherWorldX = this.vehicle.x + (-otherMount.y * cosA - otherMount.x * sinA);
-                    const otherWorldY = this.vehicle.y + (-otherMount.y * sinA + otherMount.x * cosA);
-                    
-                    const toOtherX = otherWorldX - this.worldX;
-                    const toOtherY = otherWorldY - this.worldY;
-                    const toOtherAngle = Math.atan2(toOtherY, toOtherX);
-                    let otherAngleDiff = Math.abs(this.angle - toOtherAngle);
-                    otherAngleDiff = Math.abs(Math.atan2(Math.sin(otherAngleDiff), Math.cos(otherAngleDiff)));
-                    
-                    if (otherAngleDiff < Math.PI / 6) {
-                        return;
-                    }
-                }
+                const mz = this.reach() + 3, tipX = this.worldX + Math.cos(this.angle) * mz, tipY = this.worldY + Math.sin(this.angle) * mz;
 
                 // Dual barrel offset
                 if (this.data.dual) {
@@ -759,7 +763,7 @@
                         tipX + perpX*side, tipY + perpY*side, this.angle, this.data, this.vehicle.team, this.vehicle
                     );
                     GameState.projectiles.push(proj);
-                    createExplosion(tipX + perpX*side, tipY + perpY*side, 15, '#fbbf24', 5);
+                    muzzleFx(tipX + perpX*side, tipY + perpY*side, this.angle, this.data);
                     
                     // Синхронизация выстрела с сервером
                     if (this.vehicle.isPlayer && socket && myPlayerId) {
@@ -777,7 +781,7 @@
                         tipX, tipY, this.angle, this.data, this.vehicle.team, this.vehicle
                     );
                     GameState.projectiles.push(proj);
-                    createExplosion(tipX, tipY, 10, '#fbbf24', 5);
+                    muzzleFx(tipX, tipY, this.angle, this.data);
                     
                     // Синхронизация выстрела с сервером
                     if (this.vehicle.isPlayer && socket && myPlayerId) {
@@ -1124,6 +1128,17 @@ class Vehicle {
 
     // Эффекты
     const sp = Math.hypot(this.vx, this.vy), bx = this.x - c * h.size.l / 2, by = this.y - s * h.size.l / 2;
+    const lw = h.terrain !== 'water' && h.drawType !== 'hover', L2 = h.size.l / 2, W2 = h.size.w / 2, rnd = () => Math.random() - .5;
+    if (this.pd === undefined) this.pd = depth;
+    if (lw && depth > 0 && this.pd === 0 && sp > .5) { splash(this.x, this.y, Math.max(30, h.size.l * .6)); for (let i = 0; i < 3; i++) P(this.x, this.y, 0, 0, .8 + i * .3, 'rgba(255,255,255,.6)', h.size.l * .2, {ring: true, grow: h.size.l * (1.5 + i)}); }
+    this.pd = depth;
+    const stg = !lw ? 0 : (depth === 2 ? .5 + .5 * this.flood : (depth === 1 ? .3 + .3 * this.flood : this.flood * .25));
+    this.subm = (this.subm || 0) + (stg - (this.subm || 0)) * Math.min(1, dt * 1.5);
+    if (lw && this.subm > .04) { const sb = this.subm;
+      if (Math.random() < .3 + sp * .05) for (const sd of [-1, 1]) { const lx = (Math.random() * 1.6 - .9) * L2, ly = sd * (W2 + 2);
+        P(this.x + c * lx - s * ly, this.y + s * lx + c * ly, -s * sd * 14 + rnd() * 10 - c * sp * 3, c * sd * 14 + rnd() * 10 - s * sp * 3, 1 + Math.random() * .8, 'rgba(235,248,255,.55)', 3 + Math.random() * 3, {soft: true, grow: 6, drag: .95}); }
+      if (Math.random() < sb * .5) P(this.x + c * rnd() * L2 * 1.6 - s * rnd() * W2 * 1.6, this.y + s * rnd() * L2 * 1.6 + c * rnd() * W2 * 1.6, 0, 0, .7 + Math.random() * .6, 'rgba(220,245,255,.7)', 1.5 + Math.random() * 2, {ring: true, grow: 5, rise: 14});
+      if (sp > 1 && Math.random() < .5) P(this.x - c * L2, this.y - s * L2, rnd() * 16, rnd() * 16, 1.8, 'rgba(255,255,255,.35)', 5 + sb * 6, {soft: true, grow: 10, drag: .96}); }
     if (depth > 0 && sp > 2 && Math.random() < Math.min(1, .1 + sp * .04))
       P(bx, by, (Math.random() - .5) * 20, (Math.random() - .5) * 20, 1.6, 'rgba(255,255,255,.4)', 4 + Math.random() * 4, {grow: 8, drag: .96});
     if (depth === 0 && h.terrain !== 'water' && sp > 4 && Math.random() < .3) P(bx, by, 0, 0, .9, 'rgba(120,100,60,.35)', 5, {grow: 12});
@@ -1228,9 +1243,9 @@ class Vehicle {
 
   draw(ctx) {
     const h = this.hull, dead = this.hp <= 0, l = h.size.l / 2, w = h.size.w / 2, t = performance.now() / 1000, type = h.drawType;
-    const sk = this.dead === 'sunk' ? Math.min(1, this.deadT / 6) : 0;
+    const sk = this.dead === 'sunk' ? Math.min(1, this.deadT / 6) : 0, sb = this.hull.terrain !== 'water' ? (this.subm || 0) : 0;
     const pal = dead ? ['#33302b', '#1a1816'] : (this.team === 1 ? ['#7ea03a', '#46661f'] : ['#b84a3a', '#6a2219']);
-    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.globalAlpha = 1 - sk * .9;
+    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.globalAlpha = (1 - sk * .9) * (1 - sb * .22);
     if (!dead) ctx.scale(1, 1 - this.flood * .1);
     const g = ctx.createLinearGradient(0, -w, 0, w); g.addColorStop(0, pal[0]); g.addColorStop(1, pal[1]);
     const sh = () => { ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 9; ctx.shadowOffsetX = 6; ctx.shadowOffsetY = 8; };
@@ -1271,8 +1286,18 @@ class Vehicle {
       if (type === 'ship') { ctx.fillStyle = '#3a3f44'; ctx.beginPath(); ctx.arc(-l * .38, 0, w * .28, 0, 6.3); ctx.fill(); ctx.stroke(); }
     }
     drawArmor(this, ctx, l, w, dead);
+    if (sb > .03) { // вода поверх корпуса и гусениц + пена по ватерлинии
+      ctx.save(); ctx.beginPath(); ctx.rect(-l - 6, -w - 6, l * 2 + 12, w * 2 + 12); ctx.clip();
+      ctx.fillStyle = `rgba(14,70,120,${.16 + sb * .5})`; ctx.fillRect(-l - 6, -w - 6, l * 2 + 12, w * 2 + 12);
+      ctx.strokeStyle = `rgba(190,235,255,${.2 + sb * .3})`; ctx.lineWidth = 1; ctx.beginPath();
+      for (let i = -3; i <= 3; i++) { const yy = i * w / 3.2 + Math.sin(t * 2 + i) * 2; ctx.moveTo(-l - 6, yy); for (let x = -l - 6; x <= l + 6; x += 8) ctx.lineTo(x, yy + Math.sin(x * .25 + t * 3 + i) * 1.8); }
+      ctx.stroke(); ctx.restore();
+      ctx.strokeStyle = `rgba(255,255,255,${.25 + sb * .5})`; ctx.lineWidth = 2; ctx.beginPath();
+      for (let a = 0; a <= 6.4; a += .18) { const k = 1.04 + Math.sin(a * 7 + t * 4) * .03, px = Math.cos(a) * (l + 5) * k, py = Math.sin(a) * (w + 5) * k; a ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.stroke();
+    }
     ctx.restore();
-    ctx.save(); ctx.globalAlpha = 1 - sk * .9; this.weaponSystems.forEach(ws => ws.draw(ctx)); ctx.restore();
+    ctx.save(); ctx.globalAlpha = (1 - sk * .9) * (1 - sb * .12); this.weaponSystems.forEach(ws => ws.draw(ctx)); ctx.restore();
     if (!this.isPlayer && !dead) {
       const bx = this.x - 20, by = this.y - h.size.w / 2 - 20;
       ctx.fillStyle = '#1c1917'; ctx.fillRect(bx, by, 40, 6); ctx.fillStyle = '#ef4444'; ctx.fillRect(bx, by, 40 * (this.hp / this.maxHp), 6);
@@ -1298,7 +1323,8 @@ class Projectile {
       let px = this.tgt.entity ? this.tgt.entity.x : this.tgt.x, py = this.tgt.entity ? this.tgt.entity.y : this.tgt.y, dd = Math.hypot(px - x, py - y);
       if (dd > data.range) { px = x + (px - x) / dd * data.range; py = y + (py - y) / dd * data.range; dd = data.range; }
       this.sx = x; this.sy = y; this.dest = {x: px, y: py}; this.T = Math.max(2.6, dd / data.vel); this.u = 0; this.dispX = x; this.dispY = y;
-      for (let i = 0; i < 14; i++) P(x, y, (Math.random() - .5) * 60, (Math.random() - .5) * 60, 1.5, 'rgba(230,230,230,.6)', 6, {grow: 14, drag: .96});
+      for (let i = 0; i < 30; i++) P(x, y, (Math.random() - .5) * 110, (Math.random() - .5) * 110, 2 + Math.random() * 1.5, 'rgba(235,232,225,.55)', 6 + Math.random() * 6, {soft: true, grow: 20, drag: .95});
+      P(x, y, 0, 0, .25, 'rgba(255,200,100,.9)', 20, {add: true, soft: true, grow: 80});
     }
   }
   update(dt) {
@@ -1315,10 +1341,9 @@ class Projectile {
       }
       this.v = Math.min(d.vel, this.v + d.vel * 1.2 * dt);
       this.vx = Math.cos(this.angle) * this.v; this.vy = Math.sin(this.angle) * this.v;
-      P(this.x, this.y, 0, 0, 1.2, 'rgba(210,210,210,.45)', 2.5, {grow: 5});
-      P(this.x, this.y, 0, 0, .12, '#fbbf24', 3, {add: true});
+      rocketTrail(this, 1.3);
     } else if (d.type === 'rocket') {
-      P(this.x, this.y, 0, 0, .8, 'rgba(200,200,200,.35)', 2, {grow: 4}); P(this.x, this.y, 0, 0, .1, '#fbbf24', 2.5, {add: true});
+      rocketTrail(this, .8);
     }
     const n = Math.ceil(this.v * dt / 6), sdt = dt / n; // непрерывная проверка попаданий
     for (let i = 0; i < n; i++) { this.x += this.vx * sdt; this.y += this.vy * sdt; if (this.hit()) return; }
@@ -1331,10 +1356,10 @@ class Projectile {
     const e = u * u * u; this.x = this.sx + (this.dest.x - this.sx) * e; this.y = this.sy + (this.dest.y - this.sy) * e;
     const nx = this.x, ny = this.y - Math.sin(Math.PI * Math.pow(u, .55)) * 110;
     this.angle = Math.atan2(ny - this.dispY, nx - this.dispX); this.dispX = nx; this.dispY = ny;
-    P(nx, ny, 0, 0, .9, 'rgba(220,220,220,.5)', 3, {grow: 6}); P(nx, ny, 0, 0, .1, '#fbbf24', 4, {add: true});
+    rocketTrail({x: nx, y: ny, angle: this.angle}, 2.2);
     if (u >= 1) {
       areaDamage(this.dest.x, this.dest.y, d.radius, d.dmg, d.pen, this.team);
-      createExplosion(this.dest.x, this.dest.y, d.radius * .55, '#f97316', 50); GameState.shake = Math.max(GameState.shake || 0, 14);
+      createExplosion(this.dest.x, this.dest.y, d.radius * .8, '#f97316', 0); GameState.shake = Math.max(GameState.shake || 0, 22);
       if (hAt(this.dest.x, this.dest.y) <= 0) splash(this.dest.x, this.dest.y, d.radius * .5); else dust(this.dest.x, this.dest.y, d.radius * .3);
       this.active = false;
     }
@@ -1343,6 +1368,7 @@ class Projectile {
     const d = this.data;
     for (const e of GameState.entities) {
       if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active) continue;
+      if (e === this.owner) continue; // никогда не бьём свою технику
       // В мультиплеере убираем проверку команды - можно стрелять по всем
       if (!socket && e.team === this.team) continue;
       const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
@@ -1385,13 +1411,14 @@ class Projectile {
   blast() {
     const d = this.data;
     if (d.type === 'kinetic') { for (let i = 0; i < 5; i++) P(this.x, this.y, (Math.random() - .5) * 220, (Math.random() - .5) * 220, .3, '#fde68a', 1.5, {add: true}); P(this.x, this.y, 0, 0, .6, 'rgba(60,55,50,.5)', 3, {grow: 14, rise: 15}); }
-    else createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
+    else createExplosion(this.x, this.y, d.type === 'missile' ? 70 : 44, '#f97316', 0);
   }
   impact() {
-    this.active = false;
-    if (hAt(this.x, this.y) <= 0) splash(this.x, this.y, this.data.type === 'kinetic' ? Math.min(40, 8 + this.data.dmg * .06) : 30);
-    else if (this.data.type === 'kinetic') dust(this.x, this.y, 8 + this.data.dmg * .03);
-    else createExplosion(this.x, this.y, 24, '#f97316', 12);
+    this.active = false; const d = this.data, water = hAt(this.x, this.y) <= 0;
+    if (d.type === 'missile' || d.type === 'rocket') { createExplosion(this.x, this.y, d.type === 'missile' ? Math.min(90, 40 + d.dmg * .03) : 36, '#f97316', 0); if (water) splash(this.x, this.y, d.type === 'missile' ? 50 : 32); }
+    else if (water) splash(this.x, this.y, d.type === 'kinetic' ? Math.min(40, 8 + d.dmg * .06) : 30);
+    else if (d.type === 'kinetic') { dust(this.x, this.y, 8 + d.dmg * .03); if (d.dmg >= 100) createExplosion(this.x, this.y, Math.min(40, 12 + d.dmg * .06), '#f97316', 0); }
+    else createExplosion(this.x, this.y, 24, '#f97316', 0);
   }
   draw(ctx) {
     const d = this.data;
@@ -1413,7 +1440,7 @@ class Projectile {
     if (d.type === 'missile' || d.type === 'rocket') {
       ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -2.5, 12, 5); ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(12, -2.5); ctx.lineTo(16, 0); ctx.lineTo(12, 2.5); ctx.fill();
       ctx.fillStyle = '#78716c'; ctx.fillRect(0, -4.5, 3, 9);
-      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-8 - Math.random() * 5, 0); ctx.lineTo(0, 2); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -2.5); ctx.lineTo(-14 - Math.random() * 8, 0); ctx.lineTo(0, 2.5); ctx.fill(); ctx.globalAlpha = .75; ctx.drawImage(softSprite('rgba(255,150,50,1)'), -24, -15, 30, 30); ctx.globalAlpha = 1;
     } else { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.2, 14, 2.4); }
     ctx.restore();
   }
@@ -1421,7 +1448,7 @@ class Projectile {
 
 class Particle {
   constructor(x, y, vx, vy, life, color, size, o = {}) {
-    Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false}, o);
+    Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false, soft: false}, o);
   }
   update(dt) {
     this.x += this.vx * dt; this.y += this.vy * dt - this.rise * dt; this.life -= dt;
@@ -1431,6 +1458,7 @@ class Particle {
     const a = Math.max(0, this.life / this.maxLife); ctx.globalAlpha = a;
     if (this.add) ctx.globalCompositeOperation = 'lighter';
     if (this.ring) { ctx.strokeStyle = this.color; ctx.lineWidth = 1 + 3 * a; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, 6.3); ctx.stroke(); }
+    else if (this.soft) { const r = Math.max(.1, this.size); ctx.drawImage(softSprite(this.color), this.x - r, this.y - r, r * 2, r * 2); }
     else { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(.1, this.size), 0, 6.3); ctx.fill(); }
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
@@ -1452,18 +1480,57 @@ class Particle {
             }
         }
 
-function P(x,y,vx,vy,l,c,s,o){GameState.particles.push(new Particle(x,y,vx,vy,l,c,s,o));}
+function P(x,y,vx,vy,l,c,s,o){if(GameState.particles.length<3500)GameState.particles.push(new Particle(x,y,vx,vy,l,c,s,o));}
+const SOFT={};
+function softSprite(col){let c=SOFT[col];if(c)return c;c=SOFT[col]=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');
+  g.fillStyle=col;g.fillRect(0,0,64,64);g.globalCompositeOperation='destination-in';const m=g.createRadialGradient(32,32,0,32,32,32);
+  m.addColorStop(0,'rgba(0,0,0,1)');m.addColorStop(.45,'rgba(0,0,0,.7)');m.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=m;g.fillRect(0,0,64,64);return c;}
+function segPtDist(ax,ay,bx,by,px,py){const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;let t=L?((px-ax)*dx+(py-ay)*dy)/L:0;t=Math.max(0,Math.min(1,t));return Math.hypot(ax+dx*t-px,ay+dy*t-py);}
+function segSegDist(a,b,c,d){const o=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+  if(o(a,b,c)*o(a,b,d)<0&&o(c,d,a)*o(c,d,b)<0)return 0;
+  return Math.min(segPtDist(a.x,a.y,b.x,b.y,c.x,c.y),segPtDist(a.x,a.y,b.x,b.y,d.x,d.y),segPtDist(c.x,c.y,d.x,d.y,a.x,a.y),segPtDist(c.x,c.y,d.x,d.y,b.x,b.y));}
+function muzzleFx(x,y,a,d){
+  const big=Math.min(3,Math.max(.6,Math.sqrt(d.dmg)/9)),c=Math.cos(a),s=Math.sin(a),w=()=>Math.random()-.5;
+  P(x,y,0,0,.09,'rgba(255,240,180,.95)',8*big,{add:true,soft:true,grow:30*big});
+  for(let i=0;i<4*big;i++){const sp=(120+Math.random()*260)*big,da=w()*.35;P(x,y,Math.cos(a+da)*sp,Math.sin(a+da)*sp,.12+Math.random()*.12,'#fde047',1.5,{add:true,drag:.9});}
+  if(d.dmg>=60||d.type!=='kinetic')for(let i=0;i<3*big;i++)P(x+c*6,y+s*6,c*(40+Math.random()*80)+w()*30,s*(40+Math.random()*80)+w()*30,.8+Math.random()*.9,'rgba(170,165,155,.5)',3+big*2,{soft:true,grow:10*big,drag:.93});
+  if(d.type==='rocket'||d.type==='missile'||d.type==='ballistic')for(let i=0;i<6;i++)P(x-c*14,y-s*14,-c*(80+Math.random()*120),-s*(80+Math.random()*120)+w()*60,.9+Math.random(),'rgba(200,200,195,.45)',5,{soft:true,grow:12,drag:.94});
+}
+function rocketTrail(p,k){
+  const c=Math.cos(p.angle),s=Math.sin(p.angle),bx=p.x-c*8,by=p.y-s*8,w=()=>Math.random()-.5;
+  P(bx,by,w()*14,w()*14,2.6+Math.random()*1.4,'rgba(225,222,215,.5)',2.5*k+1,{soft:true,grow:7*k,drag:.97});
+  P(bx,by,w()*10,w()*10,4+Math.random()*2,'rgba(150,146,140,.28)',3*k,{soft:true,grow:10*k,drag:.98,rise:4});
+  P(bx,by,-c*30,-s*30,.14,'rgba(255,210,90,.95)',4*k+1,{add:true,soft:true,grow:-8*k});
+  P(bx,by,-c*60,-s*60,.22,'rgba(255,110,30,.6)',7*k,{add:true,soft:true,grow:-12*k});
+  if(Math.random()<.5)P(bx,by,-c*120+w()*80,-s*120+w()*80,.35,'#ffd27a',1.3,{add:true,drag:.9});
+}
+function bigBoom(x,y,r){
+  r=Math.min(r,220);const n=Math.min(70,10+r*.5)|0,w=()=>Math.random();
+  P(x,y,0,0,.18,'rgba(255,250,220,.95)',r*.5,{add:true,soft:true,grow:r*5});
+  P(x,y,0,0,.7,'rgba(255,170,60,.9)',r*.3,{add:true,soft:true,grow:r*2.2});
+  for(let i=0;i<n;i++){const a=w()*6.283,sp=w()*r*2.4;P(x+Math.cos(a)*r*.15,y+Math.sin(a)*r*.15,Math.cos(a)*sp,Math.sin(a)*sp,.35+w()*.6,i%3?'rgba(249,115,22,.85)':'rgba(253,224,71,.9)',r*.18+w()*r*.2,{add:true,soft:true,grow:r*.5,drag:.9});}
+  for(let i=0;i<n*.9;i++){const a=w()*6.283,sp=w()*r*1.3;P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,2.5+w()*3,i%2?'rgba(45,41,38,.6)':'rgba(85,78,70,.5)',r*.2+w()*r*.2,{soft:true,grow:r*.28,rise:10+w()*14,drag:.965});}
+  for(let i=0;i<n*.8;i++){const a=w()*6.283,sp=r*(3+w()*5);P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.3+w()*.5,'#ffd27a',1.5+w()*1.5,{add:true,drag:.9});}
+  for(let i=0;i<n*.4;i++){const a=w()*6.283,sp=r*(1+w()*3);P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.8+w()*.8,'rgba(70,52,30,.9)',2+w()*3,{drag:.92});}
+  P(x,y,0,0,.55,'rgba(255,230,170,.8)',r*.3,{ring:true,grow:r*6});
+  P(x,y,0,0,1,'rgba(210,200,180,.35)',r*.4,{ring:true,grow:r*3.5});
+  GameState.shake=Math.max(GameState.shake||0,Math.min(18,r*.18));
+  if(HG&&hAt(x,y)>0){const D=GameState.decals||(GameState.decals=[]);D.push({x,y,r:r*1.3,a:.7});if(D.length>70)D.shift();}
+}
 function createExplosion(x,y,r,color,count){
-  for(let i=0;i<count;i++){const a=Math.random()*6.283,sp=Math.random()*r*3.2;
-    P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.25+Math.random()*.5,i%3?'#f97316':'#fde047',2+Math.random()*r*.12,{add:true,grow:r*.3});}
-  for(let i=0;i<count*.6;i++){const a=Math.random()*6.283,sp=Math.random()*r*1.2;
-    P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,1.2+Math.random()*1.6,'rgba(40,36,33,.5)',3+Math.random()*r*.1,{grow:r*.25,rise:14,drag:.97});}
-  for(let i=0;i<count*.4;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*r*6,Math.sin(a)*r*6,.4,'#fff7ae',1.5,{drag:.9,add:true});}
-  P(x,y,0,0,.4,'rgba(255,220,150,.8)',r*.3,{ring:true,grow:r*5});
+  if(r<=20){
+    for(let i=0;i<count;i++){const a=Math.random()*6.283,sp=Math.random()*r*3.2;P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.2+Math.random()*.3,i%3?'#f97316':'#fde047',2+Math.random()*r*.1,{add:true,soft:true,grow:r*.3});}
+    P(x,y,0,0,.15,'rgba(255,230,160,.9)',r*.8,{add:true,soft:true,grow:r*3});
+    for(let i=0;i<count*.5;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*r*2,Math.sin(a)*r*2,.8+Math.random(),'rgba(70,65,60,.45)',3+r*.15,{soft:true,grow:r*.5,rise:12,drag:.95});}
+    return;}
+  bigBoom(x,y,r);
 }
 function splash(x,y,s){
-  for(let i=0;i<10+s*.4;i++){const a=Math.random()*6.283,sp=Math.random()*s*2;P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.5+Math.random()*.6,'rgba(220,240,255,.8)',2+Math.random()*s*.12,{grow:s*.1,rise:20});}
-  P(x,y,0,0,.8,'rgba(255,255,255,.7)',s*.2,{ring:true,grow:s*3});
+  const n=Math.min(40,10+s*.5)|0;
+  for(let i=0;i<n;i++){const a=Math.random()*6.283,sp=Math.random()*s*2.2;P(x,y,Math.cos(a)*sp,Math.sin(a)*sp,.5+Math.random()*.7,'rgba(225,242,255,.8)',2+Math.random()*s*.14,{soft:true,grow:s*.12,rise:24,drag:.93});}
+  P(x,y,0,0,.9,'rgba(255,255,255,.7)',s*.2,{ring:true,grow:s*3});
+  P(x,y,0,0,1.4,'rgba(200,235,255,.45)',s*.1,{ring:true,grow:s*4.5});
+  P(x,y,0,0,.6,'rgba(235,248,255,.8)',s*.35,{soft:true,grow:s*.9,rise:30});
 }
 function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*s,Math.sin(a)*s,.8,'rgba(120,100,60,.5)',3+Math.random()*s*.2,{grow:s*.3,drag:.92});}}
 
@@ -1526,7 +1593,7 @@ function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math
             GameState.mode = mode;
             GameState.entities = [];
             GameState.projectiles = [];
-            GameState.particles = [];
+            GameState.particles = []; GameState.decals = [];
             
             const modeInd = document.getElementById('mode-indicator');
             const hud = document.getElementById('hud');
@@ -1707,6 +1774,7 @@ function drawGarage(ctx){
             ctx.scale(GameState.camera.zoom, GameState.camera.zoom);
 
             if (GameState.mode === 'combat') drawMap2(ctx); else drawGarage(ctx);
+            if (GameState.decals && GameState.decals.length) { const sp = softSprite('rgba(12,9,7,1)'); for (const d of GameState.decals) { d.a -= dt * .02; ctx.globalAlpha = Math.max(0, d.a); ctx.drawImage(sp, d.x - d.r, d.y - d.r, d.r * 2, d.r * 2); } ctx.globalAlpha = 1; GameState.decals = GameState.decals.filter(d => d.a > 0); }
 
             GameState.entities.filter(e => e.hp <= 0).forEach(e => e.draw(ctx));
             GameState.entities.filter(e => e.hp > 0).forEach(e => e.draw(ctx));
