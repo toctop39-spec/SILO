@@ -329,6 +329,22 @@
                     console.log('Игрок присоединился:', playerData.id);
                 }
             });
+            socket.on('playersList', (players) => {
+                console.log('Получен список игроков:', players.length);
+                players.forEach(playerData => {
+                    if (playerData.id !== myPlayerId) {
+                        // Создаём уже существующих игроков
+                        const remoteVehicle = new Vehicle(playerData.x, playerData.y, playerData.config, false, playerData.team);
+                        remoteVehicle.id = playerData.id;
+                        remoteVehicle.hp = playerData.hp;
+                        remoteVehicle.maxHp = playerData.maxHp;
+                        remoteVehicle.angle = playerData.angle;
+                        remoteVehicle.isRemote = true;
+                        remotePlayers.set(playerData.id, remoteVehicle);
+                        console.log('Добавлен существующий игрок:', playerData.id);
+                    }
+                });
+            });
             socket.on('playerMoved', (data) => {
                 const remotePlayer = remotePlayers.get(data.id);
                 if (remotePlayer) {
