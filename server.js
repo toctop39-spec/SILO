@@ -139,6 +139,13 @@ io.on('connection', (socket) => {
     // Находим и удаляем игрока
     for (const [id, player] of players) {
       if (player.socketId === socket.id) {
+        // Уведомляем о смерти перед удалением
+        if (player.active && player.hp > 0) {
+          io.emit('playerDied', {
+            id: id,
+            cause: 'disconnected'
+          });
+        }
         players.delete(id);
         io.emit('playerRemoved', { id });
         break;
