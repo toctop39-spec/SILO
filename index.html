@@ -1357,6 +1357,8 @@ class Projectile {
       if (!(e instanceof Vehicle) || e.hp <= 0 || !e.active) continue;
       // В мультиплеере убираем проверку команды - можно стрелять по всем
       if (!socket && e.team === this.team) continue;
+      // Снаряд не может попасть в свой же vehicle
+      if (this.owner === e) continue;
       const dx = this.x - e.x, dy = this.y - e.y, L = e.hull.size.l;
       if (dx * dx + dy * dy > L * L) continue;
       const c = Math.cos(e.angle), s = Math.sin(e.angle), lx = dx * c + dy * s, ly = -dx * s + dy * c;
