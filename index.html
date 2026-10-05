@@ -346,6 +346,20 @@
                     remotePlayer.angle = data.angle;
                     remotePlayer.vx = data.vx;
                     remotePlayer.vy = data.vy;
+                    // Обновляем состояние
+                    if (data.hp !== undefined) remotePlayer.hp = data.hp;
+                    if (data.maxHp !== undefined) remotePlayer.maxHp = data.maxHp;
+                    if (data.mods) remotePlayer.mods = data.mods;
+                    if (data.flood !== undefined) remotePlayer.flood = data.flood;
+                    if (data.fire !== undefined) remotePlayer.fire = data.fire;
+                    // Обновляем углы пушек
+                    if (data.weaponAngles && remotePlayer.weaponSystems) {
+                        data.weaponAngles.forEach((angle, i) => {
+                            if (remotePlayer.weaponSystems[i]) {
+                                remotePlayer.weaponSystems[i].angle = angle;
+                            }
+                        });
+                    }
                 }
             });
             socket.on('playerRemoved', (data) => {
@@ -1136,6 +1150,9 @@ class Vehicle {
       want = steerEnv(this, want);
       const d = Math.atan2(Math.sin(want - this.angle), Math.cos(want - this.angle));
       turn = Math.max(-1, Math.min(1, d * 2)); thr = Math.abs(d) < 1.2 ? (dist > R ? 1 : .6) : 0; trig = this.grace <= 0;
+    } else if (this.isRemote) {
+      // Удалённые игроки не управляются локально - пропускаем управление
+      thr = 0; turn = 0; trig = false; tx = 0; ty = 0;
     }
 
     // Среда: 0 суша, 1 мелководье (0..80px), 2 глубина
@@ -1195,13 +1212,23 @@ class Vehicle {
         const now = Date.now();
         if (!this.lastSyncTime || now - this.lastSyncTime > 50) { // Отправляем каждые 50мс
             this.lastSyncTime = now;
+            
+            // Собираем углы пушек
+            const weaponAngles = this.weaponSystems.map(ws => ws.angle);
+            
             socket.emit('playerUpdate', {
                 id: myPlayerId,
                 x: this.x,
                 y: this.y,
                 angle: this.angle,
                 vx: this.vx,
-                vy: this.vy
+                vy: this.vy,
+                hp: this.hp,
+                maxHp: this.maxHp,
+                mods: this.mods,
+                flood: this.flood,
+                fire: this.fire,
+                weaponAngles: weaponAngles
             });
         }
     }
@@ -1409,7 +1436,7 @@ class Projectile {
         // Синхронизация урона
         if (socket && myPlayerId) {
             if (e.isPlayer && this.isRemote) {
-                // Удалённый снаряд попал в локального игрока
+                // Удалённый снаряд попал в локального игрока - отправляем новый HP
                 socket.emit('hit', {
                     targetId: myPlayerId,
                     hp: e.hp,
