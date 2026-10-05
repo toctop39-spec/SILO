@@ -367,6 +367,7 @@
                     playerVehicle.mods = data.mods;
                     playerVehicle.flood = data.flood;
                     playerVehicle.fire = data.fire;
+                    console.log('Локальный игрок получил урон:', data.hp);
                 } else {
                     // Обновляем удалённого игрока
                     const remotePlayer = remotePlayers.get(data.targetId);
@@ -375,6 +376,7 @@
                         remotePlayer.mods = data.mods;
                         remotePlayer.flood = data.flood;
                         remotePlayer.fire = data.fire;
+                        console.log('Удалённый игрок получил урон:', data.targetId, data.hp);
                     }
                 }
             });
@@ -780,12 +782,30 @@
                     
                     // Синхронизация выстрела с сервером
                     if (this.vehicle.isPlayer && socket && myPlayerId) {
+                        // Клонируем weaponData чтобы избежать проблем с сериализацией
+                        const weaponDataClone = {
+                            id: this.data.id,
+                            type: this.data.type,
+                            dmg: this.data.dmg,
+                            pen: this.data.pen,
+                            vel: this.data.vel,
+                            range: this.data.range,
+                            reload: this.data.reload,
+                            turn: this.data.turn,
+                            barrelW: this.data.barrelW,
+                            length: this.data.length,
+                            color: this.data.color,
+                            dual: this.data.dual,
+                            burst: this.data.burst,
+                            burstReload: this.data.burstReload,
+                            radius: this.data.radius
+                        };
                         socket.emit('fire', {
                             playerId: myPlayerId,
                             x: tipX + perpX*side,
                             y: tipY + perpY*side,
                             angle: this.angle,
-                            weaponData: this.data,
+                            weaponData: weaponDataClone,
                             team: this.vehicle.team
                         });
                     }
@@ -798,12 +818,30 @@
                     
                     // Синхронизация выстрела с сервером
                     if (this.vehicle.isPlayer && socket && myPlayerId) {
+                        // Клонируем weaponData чтобы избежать проблем с сериализацией
+                        const weaponDataClone = {
+                            id: this.data.id,
+                            type: this.data.type,
+                            dmg: this.data.dmg,
+                            pen: this.data.pen,
+                            vel: this.data.vel,
+                            range: this.data.range,
+                            reload: this.data.reload,
+                            turn: this.data.turn,
+                            barrelW: this.data.barrelW,
+                            length: this.data.length,
+                            color: this.data.color,
+                            dual: this.data.dual,
+                            burst: this.data.burst,
+                            burstReload: this.data.burstReload,
+                            radius: this.data.radius
+                        };
                         socket.emit('fire', {
                             playerId: myPlayerId,
                             x: tipX,
                             y: tipY,
                             angle: this.angle,
-                            weaponData: this.data,
+                            weaponData: weaponDataClone,
                             team: this.vehicle.team
                         });
                     }
@@ -1285,6 +1323,7 @@ class Vehicle {
     drawArmor(this, ctx, l, w, dead);
     ctx.restore();
     ctx.save(); ctx.globalAlpha = 1 - sk * .9; this.weaponSystems.forEach(ws => ws.draw(ctx)); ctx.restore();
+    // Рисуем HP полоску для удалённых игроков и ботов
     if (!this.isPlayer && !dead) {
       const bx = this.x - 20, by = this.y - h.size.w / 2 - 20;
       ctx.fillStyle = '#1c1917'; ctx.fillRect(bx, by, 40, 6); ctx.fillStyle = '#ef4444'; ctx.fillRect(bx, by, 40 * (this.hp / this.maxHp), 6);
@@ -1722,8 +1761,9 @@ function drawGarage(ctx){
 
             if (GameState.mode === 'combat') drawMap2(ctx); else drawGarage(ctx);
 
-            GameState.entities.filter(e => e.hp <= 0).forEach(e => e.draw(ctx));
-            GameState.entities.filter(e => e.hp > 0).forEach(e => e.draw(ctx));
+            // Рисуем всех сущностей (локальные + удалённые игроки)
+            [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp <= 0 && e.draw).forEach(e => e.draw(ctx));
+            [...GameState.entities, ...remotePlayers.values()].filter(e => e.hp > 0 && e.draw).forEach(e => e.draw(ctx));
             GameState.particles.forEach(p => p.draw(ctx));
             GameState.projectiles.forEach(p => p.draw(ctx));
             drawLock(ctx); drawMini();
