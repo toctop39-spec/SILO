@@ -600,9 +600,9 @@
                 { id: 'w_rocket_pod', name: 'РСЗО "Град" (блок)', size: 2, type: 'rocket', mass: 2000, dmg: 80, pen: 30, reload: 0.3, burst: 10, burstReload: 8.0, vel: 600, range: 1200, turn: 1.0, icon: '🎆', desc: 'Выпускает рой неуправляемых ракет.', color: '#f97316', length: 20, barrelW: 15, isBox: true },
 
                 // Heavy (Size 3)
-                { id: 'w_cannon152', name: 'Орудие 152мм', size: 3, type: 'kinetic', mass: 8000, dmg: 450, pen: 220, reload: 7.0, vel: 750, range: 1200, turn: 0.5, icon: '152', desc: 'Огромный урон, долгая перезарядка.', color: '#f59e0b', length: 60, barrelW: 9 },
-                { id: 'w_naval', name: 'Морская Батарея (2х 203мм)', size: 3, type: 'kinetic', mass: 45000, dmg: 400, pen: 250, reload: 0.5, burst: 2, burstReload: 6.0, vel: 900, range: 2000, turn: 0.3, icon: '⚓', desc: 'Сдвоенная корабельная башня.', color: '#fbbf24', length: 70, barrelW: 8, dual: true },
-                { id: 'w_cruise', name: 'Крылатая Ракета', size: 3, type: 'missile', mass: 12000, dmg: 1500, pen: 1000, reload: 15.0, vel: 300, range: 3000, turn: 0.5, icon: '☢️', desc: 'Медленная, но уничтожает почти всё.', color: '#ef4444', length: 40, barrelW: 12, isBox: true }
+                { id: 'w_cannon152', name: 'Орудие 152мм', size: 3, type: 'kinetic', mass: 8000, dmg: 450, pen: 220, reload: 7.0, vel: 750, range: 1200, turn: 0.25, icon: '152', desc: 'Огромный урон, долгая перезарядка.', color: '#f59e0b', length: 60, barrelW: 9 },
+                { id: 'w_naval', name: 'Морская Батарея (2х 203мм)', size: 3, type: 'kinetic', mass: 45000, dmg: 400, pen: 250, reload: 0.5, burst: 2, burstReload: 6.0, vel: 900, range: 2000, turn: 0.15, icon: '⚓', desc: 'Сдвоенная корабельная башня.', color: '#fbbf24', length: 70, barrelW: 8, dual: true },
+                { id: 'w_cruise', name: 'Крылатая Ракета', size: 3, type: 'missile', mass: 12000, dmg: 1800, pen: 1200, reload: 20.0, vel: 850, range: 4000, turn: 0.08, icon: '☢️', desc: 'Сверхзвуковая, почти не маневрирует. Огромный взрыв.', color: '#ef4444', length: 55, barrelW: 14, isBox: true, blastRadius: 180 }
             ]
         };
 
@@ -878,22 +878,22 @@
 
             fireProjectile() {
                 this.recoil = this.data.barrelW; // visual pushback
-                
+
                 const tipX = this.worldX + Math.cos(this.angle) * this.data.length;
                 const tipY = this.worldY + Math.sin(this.angle) * this.data.length;
-                
+
                 // Предохранитель от самопопадания - проверяем не смотрит ли пушка на свой же корпус
                 const toCenterX = this.vehicle.x - this.worldX;
                 const toCenterY = this.vehicle.y - this.worldY;
                 const toCenterAngle = Math.atan2(toCenterY, toCenterX);
                 let angleDiff = Math.abs(this.angle - toCenterAngle);
                 angleDiff = Math.abs(Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff))); // Normalize
-                
+
                 // Если пушка смотрит в сторону своего корпуса (в пределах 45 градусов), не стреляем
                 if (angleDiff < Math.PI / 4) {
                     return;
                 }
-                
+
                 // Также проверяем что пушка не смотрит на другие части того же vehicle
                 for (const otherMount of this.vehicle.hull.mounts) {
                     if (otherMount.id === this.mount.id) continue;
@@ -901,13 +901,13 @@
                     const sinA = Math.sin(this.vehicle.angle);
                     const otherWorldX = this.vehicle.x + (-otherMount.y * cosA - otherMount.x * sinA);
                     const otherWorldY = this.vehicle.y + (-otherMount.y * sinA + otherMount.x * cosA);
-                    
+
                     const toOtherX = otherWorldX - this.worldX;
                     const toOtherY = otherWorldY - this.worldY;
                     const toOtherAngle = Math.atan2(toOtherY, toOtherX);
                     let otherAngleDiff = Math.abs(this.angle - toOtherAngle);
                     otherAngleDiff = Math.abs(Math.atan2(Math.sin(otherAngleDiff), Math.cos(otherAngleDiff)));
-                    
+
                     if (otherAngleDiff < Math.PI / 6) {
                         return;
                     }
@@ -927,10 +927,33 @@
                 // Сообщаем остальным: стартовые параметры уже с учётом разброса (proj.angle)
                 if (this.vehicle.isPlayer) NET.sendFire(this, proj);
 
-                // Physics pushback on hull
-                const impulse = this.data.dmg * this.data.vel * 0.00002 / (this.vehicle.mass / 10000);
+                // Усиленная отдача в зависимости от калибра
+                const recoilMult = this.data.size === 3 ? 0.00015 : (this.data.size === 2 ? 0.00008 : 0.00003);
+                const impulse = this.data.dmg * this.data.vel * recoilMult / (this.vehicle.mass / 10000);
                 this.vehicle.vx -= Math.cos(this.angle) * impulse;
                 this.vehicle.vy -= Math.sin(this.angle) * impulse;
+
+                // Тряска камеры при выстреле из тяжёлых орудий
+                if (this.data.size >= 2) {
+                    const shakeIntensity = this.data.size === 3 ? 8 : 4;
+                    GameState.shake = Math.max(GameState.shake || 0, shakeIntensity);
+                }
+
+                // Дым при выстреле из тяжёлых орудий
+                if (this.data.size >= 2) {
+                    const smokeCount = this.data.size === 3 ? 20 : 12;
+                    for (let i = 0; i < smokeCount; i++) {
+                        const spread = this.data.size === 3 ? 25 : 15;
+                        const angle = (Math.random() - .5) * 0.8;
+                        const speed = 5 + Math.random() * 10;
+                        const vx = Math.cos(this.angle + angle) * speed;
+                        const vy = Math.sin(this.angle + angle) * speed;
+                        const life = 3 + Math.random() * 2;
+                        const size = 15 + Math.random() * 20;
+                        // Реалистичный дым с несколькими слоями
+                        createSmoke(ox, oy, vx, vy, life, size);
+                    }
+                }
             }
 
             draw(ctx) {
@@ -940,10 +963,133 @@
                 ctx.save(); ctx.translate(this.worldX, this.worldY); ctx.rotate(this.angle);
                 ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 6; ctx.shadowOffsetX = 4; ctx.shadowOffsetY = 5;
                 ctx.strokeStyle = '#0c0a09'; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
-                if (d.isBox) {
+
+                // Уникальные дизайны для каждого типа орудия
+                if (d.id === 'w_mg') {
+                    // Пулемёт: компактный, тонкий ствол
+                    const R = w * 1.2 + 3;
+                    ctx.fillStyle = '#292524';
+                    ctx.fillRect(R - rc, -w/2, len, w);
+                    ctx.fillStyle = dead ? '#1a1816' : '#4a4540';
+                    ctx.fillRect(R - rc + len - 3, -w/2 - 1, 4, w + 2);
+                    ctx.shadowColor = 'transparent';
+                    ctx.fillStyle = col; ctx.beginPath();
+                    for (let i = 0; i < 5; i++) { const a = i * 1.257 + .63; i ? ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R) : ctx.moveTo(Math.cos(a) * R, Math.sin(a) * R); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    // Трубка охлаждения
+                    ctx.fillStyle = '#3d372e'; ctx.fillRect(R + len * 0.3, -w/2 - 1, len * 0.4, w + 2);
+                }
+                else if (d.id === 'w_atgm') {
+                    // ПТУР: пусковая труба, трапецеидальная
+                    ctx.fillStyle = dead ? '#2b2724' : '#3a352f';
+                    ctx.beginPath();
+                    ctx.moveTo(-w, -w); ctx.lineTo(w * 2.5, -w * 0.6); ctx.lineTo(w * 2.5, w * 0.6); ctx.lineTo(-w, w);
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    ctx.fillStyle = '#0c0a09';
+                    ctx.fillRect(-w + 2, -w * 0.3, w * 3, w * 0.6);
+                    // Прицел
+                    ctx.fillStyle = dead ? '#1a1816' : '#4a4540';
+                    ctx.beginPath(); ctx.arc(-w - 2, 0, w * 0.8, 0, 6.3); ctx.fill(); ctx.stroke();
+                }
+                else if (d.id === 'w_auto30') {
+                    // Автопушка 30мм: короткая толстая, дульный тормоз
+                    const R = w * 1.4 + 4;
+                    ctx.fillStyle = '#292524';
+                    ctx.fillRect(R - rc, -w/2, len, w);
+                    ctx.shadowColor = 'transparent';
+                    // Дульный тормоз
+                    ctx.fillStyle = dead ? '#1a1816' : '#4a4540';
+                    ctx.fillRect(R - rc + len - 6, -w/2 - 2, 8, w + 4);
+                    ctx.fillStyle = col; ctx.beginPath();
+                    for (let i = 0; i < 6; i++) { const a = i * 1.047 + .52; i ? ctx.lineTo(Math.cos(a) * R * 1.1, Math.sin(a) * R) : ctx.moveTo(Math.cos(a) * R * 1.1, Math.sin(a) * R); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    // Рёбра охлаждения
+                    ctx.strokeStyle = '#1c1917'; ctx.lineWidth = 1;
+                    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(R + len * 0.2, -w/2 + i * w/3); ctx.lineTo(R + len * 0.8, -w/2 + i * w/3); ctx.stroke(); }
+                }
+                else if (d.id === 'w_cannon76') {
+                    // Пушка 76мм: классическая танковая, длинный ствол
+                    const R = w * 1.5 + 4;
+                    ctx.fillStyle = '#292524';
+                    ctx.fillRect(R - rc, -w/2, len, w);
+                    ctx.fillRect(R - rc + len - 5, -w/2 - 1, 6, w + 2);
+                    ctx.shadowColor = 'transparent';
+                    ctx.fillStyle = col; ctx.beginPath();
+                    for (let i = 0; i < 6; i++) { const a = i * 1.047 + .52; i ? ctx.lineTo(Math.cos(a) * R * 1.1, Math.sin(a) * R) : ctx.moveTo(Math.cos(a) * R * 1.1, Math.sin(a) * R); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    const g = ctx.createRadialGradient(-R * .3, -R * .3, 1, 0, 0, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(0,0,0,.25)');
+                    ctx.fillStyle = g; ctx.fill();
+                    ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(-R * .25, R * .3, R * .22, 0, 6.3); ctx.fill();
+                    // Дульный срез
+                    ctx.fillStyle = dead ? '#1a1816' : '#3d372e';
+                    ctx.beginPath(); ctx.ellipse(R - rc + len, 0, w * 0.4, w * 0.3, 0, 0, 6.3); ctx.fill();
+                }
+                else if (d.id === 'w_rocket_pod') {
+                    // РСЗО: коробка с пусковыми трубами (оригинальный дизайн)
                     ctx.fillStyle = dead ? '#2b2724' : '#3a352f'; ctx.fillRect(-w, -w, w * 2.2, w * 2); ctx.shadowColor = 'transparent'; ctx.strokeRect(-w, -w, w * 2.2, w * 2);
                     ctx.fillStyle = '#0c0a09'; for (let j = 0; j < 4; j++) { ctx.beginPath(); ctx.arc(w * 1.0, -w + w * (.25 + j * .5), w * .17, 0, 6.3); ctx.fill(); }
-                } else {
+                }
+                else if (d.id === 'w_cannon152') {
+                    // Гаубица 152мм: массивная, короткая, с дульным тормозом
+                    const R = w * 1.8 + 5;
+                    ctx.fillStyle = '#292524';
+                    ctx.fillRect(R - rc, -w/2, len, w);
+                    ctx.fillRect(R - rc + len - 8, -w/2 - 3, 10, w + 6);
+                    ctx.shadowColor = 'transparent';
+                    ctx.fillStyle = col; ctx.beginPath();
+                    for (let i = 0; i < 8; i++) { const a = i * 0.785 + .39; i ? ctx.lineTo(Math.cos(a) * R * 1.15, Math.sin(a) * R) : ctx.moveTo(Math.cos(a) * R * 1.15, Math.sin(a) * R); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    const g = ctx.createRadialGradient(-R * .3, -R * .3, 1, 0, 0, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(0,0,0,.25)');
+                    ctx.fillStyle = g; ctx.fill();
+                    ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(-R * .3, R * .35, R * .25, 0, 6.3); ctx.fill();
+                    // Маска
+                    ctx.fillStyle = dead ? '#1a1816' : '#4a4540';
+                    ctx.fillRect(R - 5, -w * 0.8, 8, w * 1.6);
+                }
+                else if (d.id === 'w_naval') {
+                    // Морская башня 2x203мм: сдвоенные стволы
+                    const R = w * 1.6 + 5;
+                    ctx.fillStyle = '#292524';
+                    ctx.fillRect(R - rc, -w, len, w - 1);
+                    ctx.fillRect(R - rc, 1, len, w - 1);
+                    ctx.fillRect(R - rc + len - 6, -w - 1, 7, w * 2 + 2);
+                    ctx.shadowColor = 'transparent';
+                    ctx.fillStyle = col; ctx.beginPath();
+                    for (let i = 0; i < 8; i++) { const a = i * 0.785 + .39; i ? ctx.lineTo(Math.cos(a) * R * 1.1, Math.sin(a) * R) : ctx.moveTo(Math.cos(a) * R * 1.1, Math.sin(a) * R); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    const g = ctx.createRadialGradient(-R * .3, -R * .3, 1, 0, 0, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(0,0,0,.25)');
+                    ctx.fillStyle = g; ctx.fill();
+                    ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(-R * .3, R * .35, R * .25, 0, 6.3); ctx.fill();
+                }
+                else if (d.id === 'w_cruise') {
+                    // Крылатая ракета: длинная контейнерная пусковая
+                    ctx.fillStyle = dead ? '#2b2724' : '#3a352f';
+                    ctx.fillRect(-w * 1.5, -w * 1.2, len + w * 2, w * 2.4);
+                    ctx.shadowColor = 'transparent'; ctx.strokeRect(-w * 1.5, -w * 1.2, len + w * 2, w * 2.4);
+                    // Направляющие
+                    ctx.fillStyle = '#0c0a09';
+                    ctx.fillRect(-w * 1.5, -w * 0.3, len + w * 2, w * 0.6);
+                    ctx.fillRect(-w * 1.5, w * 0.3, len + w * 2, w * 0.6);
+                    // Радиационный знак
+                    if (!dead) {
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.beginPath(); ctx.arc(-w * 0.5, 0, w * 0.4, 0, 6.3); ctx.fill();
+                        ctx.fillStyle = '#1c1917';
+                        ctx.fillRect(-w * 0.9, -w * 0.08, w * 0.8, w * 0.16);
+                        ctx.fillRect(-w * 0.5, -w * 0.7, w * 0.16, w * 1.4);
+                        ctx.fillRect(-w * 0.1, -w * 0.5, w * 0.7, w * 0.16);
+                    }
+                }
+                else if (d.type === 'ballistic') {
+                    // Баллистические ракеты: квадратная пусковая установка
+                    ctx.fillStyle = dead ? '#2b2724' : '#3a352f';
+                    ctx.fillRect(-w, -w, w * 2.2, w * 2);
+                    ctx.shadowColor = 'transparent'; ctx.strokeRect(-w, -w, w * 2.2, w * 2);
+                    ctx.fillStyle = '#0c0a09';
+                    for (let j = 0; j < 4; j++) { ctx.beginPath(); ctx.arc(w * 1.0, -w + w * (.25 + j * .5), w * .17, 0, 6.3); ctx.fill(); }
+                }
+                else {
+                    // Дефолтный дизайн для остальных
                     const R = w * 1.5 + 4;
                     ctx.fillStyle = '#292524';
                     if (d.dual) { ctx.fillRect(R - rc, -w, len, w - 1); ctx.fillRect(R - rc, 1, len, w - 1); }
@@ -955,12 +1101,40 @@
                     const g = ctx.createRadialGradient(-R * .3, -R * .3, 1, 0, 0, R * 1.2); g.addColorStop(0, 'rgba(255,255,255,.3)'); g.addColorStop(1, 'rgba(0,0,0,.25)');
                     ctx.fillStyle = g; ctx.fill();
                     ctx.fillStyle = '#1c1917'; ctx.beginPath(); ctx.arc(-R * .25, R * .3, R * .22, 0, 6.3); ctx.fill();
-                    if (!dead && rc > w * .5) { // вспышка выстрела
-                        const fx = R + len + 4, fg = ctx.createRadialGradient(fx, 0, 0, fx, 0, 10 + w * 2);
-                        fg.addColorStop(0, 'rgba(255,255,220,.95)'); fg.addColorStop(1, 'rgba(255,140,30,0)');
-                        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(fx, 0, 10 + w * 2, 0, 6.3); ctx.fill();
+                }
+
+                // Вспышка выстрела
+                if (!dead && rc > w * .5) {
+                    const fx = (d.id === 'w_cruise' || d.type === 'ballistic') ? len + w * 2 : (d.dual ? len + w + 4 : len + w + 8);
+                    const fg = ctx.createRadialGradient(fx, 0, 0, fx, 0, (d.id === 'w_cruise' ? 25 : 15) + w * 2);
+                    fg.addColorStop(0, 'rgba(255,255,220,.95)'); fg.addColorStop(1, 'rgba(255,140,30,0)');
+                    ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(fx, 0, (d.id === 'w_cruise' ? 25 : 15) + w * 2, 0, 6.3); ctx.fill();
+                }
+
+                // Индикатор перезарядки (только для игрока)
+                if (!dead && this.vehicle.isPlayer) {
+                    const maxReload = d.burst ? d.burstReload : d.reload;
+                    const currentReload = this.burstShotsLeft > 0 ? this.burstIntervalTimer : this.reloadTimer;
+                    const reloadPct = 1 - (currentReload / maxReload);
+
+                    if (reloadPct < 1) {
+                        const barWidth = 30;
+                        const barHeight = 4;
+                        const barY = -w - 12;
+
+                        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                        ctx.fillRect(-barWidth/2, barY, barWidth, barHeight);
+
+                        const barColor = reloadPct < 0.3 ? '#ef4444' : (reloadPct < 0.7 ? '#f59e0b' : '#22c55e');
+                        ctx.fillStyle = barColor;
+                        ctx.fillRect(-barWidth/2, barY, barWidth * reloadPct, barHeight);
+
+                        ctx.strokeStyle = '#0c0a09';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(-barWidth/2, barY, barWidth, barHeight);
                     }
                 }
+
                 ctx.restore();
             }
         }
@@ -974,9 +1148,9 @@ const ARM = [
 ];
 function armorMass(a, h) { return Math.round(a.mk * h.size.l * h.size.w / 1000 * .5 / 10) * 10; }
 DB.weapons.push(
-  {id:'w_bm_light', name:'Ракета "Копьё" (навесная)', size:1, type:'ballistic', mass:400, dmg:230, pen:320, radius:75, reload:9, vel:700, range:2400, turn:9, icon:'🎯', desc:'Взлетает вверх и пикирует на цель. ПКМ - выбор цели.', color:'#38bdf8', length:10, barrelW:7, isBox:true},
-  {id:'w_bm_mid', name:'Баллистическая "Молот"', size:2, type:'ballistic', mass:2500, dmg:550, pen:500, radius:110, reload:12, vel:800, range:3200, turn:9, icon:'🎯', desc:'Удар сверху по площади.', color:'#38bdf8', length:10, barrelW:10, isBox:true},
-  {id:'w_bm_heavy', name:'Баллистическая "Гром"', size:3, type:'ballistic', mass:9000, dmg:1300, pen:900, radius:170, reload:18, vel:900, range:4200, turn:9, icon:'🎯', desc:'Мощный удар сверху, большой радиус.', color:'#38bdf8', length:10, barrelW:14, isBox:true});
+  {id:'w_bm_light', name:'Ракета "Копьё" (навесная)', size:1, type:'ballistic', mass:400, dmg:230, pen:320, radius:75, reload:9, vel:700, range:2400, turn:4, icon:'🎯', desc:'Взлетает вверх и пикирует на цель. ПКМ - выбор цели.', color:'#38bdf8', length:10, barrelW:7, isBox:true},
+  {id:'w_bm_mid', name:'Баллистическая "Молот"', size:2, type:'ballistic', mass:2500, dmg:550, pen:500, radius:110, reload:12, vel:800, range:3200, turn:2, icon:'🎯', desc:'Удар сверху по площади.', color:'#38bdf8', length:10, barrelW:10, isBox:true},
+  {id:'w_bm_heavy', name:'Баллистическая "Гром"', size:3, type:'ballistic', mass:9000, dmg:1300, pen:900, radius:170, reload:18, vel:900, range:4200, turn:1, icon:'🎯', desc:'Мощный удар сверху, большой радиус.', color:'#38bdf8', length:10, barrelW:14, isBox:true});
 
 function areaDamage(x, y, r, dmg, pen, team) {
   GameState.entities.forEach(e => {
@@ -1559,7 +1733,11 @@ class Projectile {
   blast() {
     const d = this.data;
     if (d.type === 'kinetic') { for (let i = 0; i < 5; i++) P(this.x, this.y, (Math.random() - .5) * 220, (Math.random() - .5) * 220, .3, '#fde68a', 1.5, {add: true}); P(this.x, this.y, 0, 0, .6, 'rgba(60,55,50,.5)', 3, {grow: 14, rise: 15}); }
-    else createExplosion(this.x, this.y, d.type === 'missile' ? 40 : 26, '#f97316', d.type === 'missile' ? 28 : 14);
+    else {
+      const radius = d.blastRadius || (d.type === 'missile' ? 40 : 26);
+      const count = d.type === 'missile' && d.id === 'w_cruise' ? 80 : (d.type === 'missile' ? 28 : 14);
+      createExplosion(this.x, this.y, radius, '#f97316', count);
+    }
   }
   impact() {
     this.active = false;
@@ -1574,9 +1752,15 @@ class Projectile {
       ctx.save(); ctx.strokeStyle = 'rgba(239,68,68,.75)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.arc(this.dest.x, this.dest.y, d.radius, 0, 6.3); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(this.x, this.y, 5, 3, 0, 0, 6.3); ctx.fill();
       const sc = 1 + Math.sin(Math.PI * Math.pow(this.u, .55)) * .8; ctx.translate(this.dispX, this.dispY); ctx.rotate(this.angle); ctx.scale(sc, sc);
-      ctx.fillStyle = '#e7e5e4'; ctx.fillRect(-10, -3, 20, 6); ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(10, -3); ctx.lineTo(16, 0); ctx.lineTo(10, 3); ctx.fill();
-      ctx.fillStyle = '#78716c'; ctx.fillRect(-10, -5.5, 4, 11);
-      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(-10, -2.5); ctx.lineTo(-20 - Math.random() * 8, 0); ctx.lineTo(-10, 2.5); ctx.fill();
+      // Баллистическая ракета - крупный снаряд
+      ctx.fillStyle = '#e7e5e4'; ctx.fillRect(-12, -4, 24, 8);
+      ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(12, -4); ctx.lineTo(18, 0); ctx.lineTo(12, 4); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(-12, -6, 5, 12);
+      // Хвостовые стабилизаторы
+      ctx.fillStyle = '#57534e';
+      ctx.beginPath(); ctx.moveTo(-12, -6); ctx.lineTo(-18, -10); ctx.lineTo(-15, -6); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-12, 6); ctx.lineTo(-18, 10); ctx.lineTo(-15, 6); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(-12, -3); ctx.lineTo(-24 - Math.random() * 10, 0); ctx.lineTo(-12, 3); ctx.fill();
       ctx.restore(); return;
     }
     if (this.trail.length > 1) {
@@ -1585,18 +1769,92 @@ class Projectile {
       ctx.strokeStyle = d.color; ctx.globalAlpha = .6; ctx.lineWidth = d.type === 'kinetic' ? 2 : 3; ctx.stroke(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     }
     ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
-    if (d.type === 'missile' || d.type === 'rocket') {
+
+    // Уникальные дизайны снарядов
+    if (d.id === 'w_mg') {
+      // Пулемётная пуля: маленькая яркая точка
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -0.8, 8, 1.6);
+      ctx.fillStyle = '#fbbf24'; ctx.fillRect(-2, -1.2, 3, 2.4);
+    }
+    else if (d.id === 'w_atgm') {
+      // ПТУР: тонкая ракета с хвостом
+      ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -2, 14, 4);
+      ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(14, -2); ctx.lineTo(18, 0); ctx.lineTo(14, 2); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(0, -3, 3, 6);
+      // Хвост
+      ctx.fillStyle = '#57534e';
+      ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(-6, -5); ctx.lineTo(-3, -3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 3); ctx.lineTo(-6, 5); ctx.lineTo(-3, 3); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -1.5); ctx.lineTo(-10 - Math.random() * 4, 0); ctx.lineTo(0, 1.5); ctx.fill();
+    }
+    else if (d.id === 'w_auto30') {
+      // Снаряд 30мм: средний с ярким следом
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.5, 12, 3);
+      ctx.fillStyle = '#fbbf24'; ctx.fillRect(-3, -2, 4, 4);
+    }
+    else if (d.id === 'w_cannon76') {
+      // Снаряд 76мм: крупный
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -2, 16, 4);
+      ctx.fillStyle = '#f59e0b'; ctx.fillRect(-4, -2.5, 5, 5);
+    }
+    else if (d.id === 'w_rocket_pod') {
+      // НУРС: толстый короткий с яркой головой
+      ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -3, 10, 6);
+      ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(10, -3); ctx.lineTo(14, 0); ctx.lineTo(10, 3); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(0, -4, 3, 8);
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-12 - Math.random() * 6, 0); ctx.lineTo(0, 2); ctx.fill();
+    }
+    else if (d.id === 'w_cannon152') {
+      // Снаряд 152мм: очень крупный
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -3, 20, 6);
+      ctx.fillStyle = '#f59e0b'; ctx.fillRect(-5, -3.5, 6, 7);
+    }
+    else if (d.id === 'w_naval') {
+      // Морской снаряд: крупный бронебойный
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -2.5, 18, 5);
+      ctx.fillStyle = '#f59e0b'; ctx.fillRect(-4, -3, 5, 6);
+      // Острый нос
+      ctx.fillStyle = '#e7e5e4'; ctx.beginPath(); ctx.moveTo(18, -2.5); ctx.lineTo(24, 0); ctx.lineTo(18, 2.5); ctx.fill();
+    }
+    else if (d.id === 'w_cruise') {
+      // Крылатая ракета: длинная тонкая с хвостом
+      ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -2, 28, 4);
+      ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(28, -2); ctx.lineTo(34, 0); ctx.lineTo(28, 2); ctx.fill();
+      ctx.fillStyle = '#78716c'; ctx.fillRect(0, -3, 4, 6);
+      // Крылья
+      ctx.fillStyle = '#57534e';
+      ctx.beginPath(); ctx.moveTo(8, -3); ctx.lineTo(12, -8); ctx.lineTo(16, -3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(8, 3); ctx.lineTo(12, 8); ctx.lineTo(16, 3); ctx.fill();
+      // Хвостовые стабилизаторы
+      ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(-5, -7); ctx.lineTo(-2, -3); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 3); ctx.lineTo(-5, 7); ctx.lineTo(-2, 3); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-15 - Math.random() * 8, 0); ctx.lineTo(0, 2); ctx.fill();
+      // Пульсирующее свечение
+      const pulse = Math.sin(performance.now() / 100) * 0.3 + 0.7;
+      ctx.globalAlpha = pulse * 0.3; ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(14, 0, 6, 0, 6.3); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    else if (d.type === 'missile' || d.type === 'rocket') {
+      // Дефолтная ракета
       ctx.fillStyle = '#d6d3d1'; ctx.fillRect(0, -2.5, 12, 5); ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(12, -2.5); ctx.lineTo(16, 0); ctx.lineTo(12, 2.5); ctx.fill();
       ctx.fillStyle = '#78716c'; ctx.fillRect(0, -4.5, 3, 9);
       ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(-8 - Math.random() * 5, 0); ctx.lineTo(0, 2); ctx.fill();
-    } else { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.2, 14, 2.4); }
+    }
+    else {
+      // Дефолтный кинетический снаряд
+      ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = '#fff3b0'; ctx.fillRect(0, -1.2, 14, 2.4);
+    }
     ctx.restore();
   }
 }
 
 class Particle {
   constructor(x, y, vx, vy, life, color, size, o = {}) {
-    Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false}, o);
+    Object.assign(this, {x, y, vx, vy, life, maxLife: life, color, size}, {grow: 0, add: false, drag: .95, rise: 0, ring: false, smoke: false}, o);
   }
   update(dt) {
     this.x += this.vx * dt; this.y += this.vy * dt - this.rise * dt; this.life -= dt;
@@ -1606,7 +1864,34 @@ class Particle {
     const a = Math.max(0, this.life / this.maxLife); ctx.globalAlpha = a;
     if (this.add) ctx.globalCompositeOperation = 'lighter';
     if (this.ring) { ctx.strokeStyle = this.color; ctx.lineWidth = 1 + 3 * a; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, 6.3); ctx.stroke(); }
-    else { ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(.1, this.size), 0, 6.3); ctx.fill(); }
+    else if (this.smoke) {
+      // Дым: рисуем несколько перекрывающихся кругов для объёма
+      const blobs = 5 + Math.floor(Math.random() * 3);
+      const colorMatch = this.color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+      if (colorMatch) {
+        const r = colorMatch[1], g = colorMatch[2], b = colorMatch[3], baseAlpha = parseFloat(colorMatch[4]);
+        for (let i = 0; i < blobs; i++) {
+          const offsetX = (Math.random() - 0.5) * this.size * 0.6;
+          const offsetY = (Math.random() - 0.5) * this.size * 0.6;
+          const blobSize = this.size * (0.5 + Math.random() * 0.5);
+          const gradient = ctx.createRadialGradient(
+            this.x + offsetX, this.y + offsetY, 0,
+            this.x + offsetX, this.y + offsetY, blobSize
+          );
+          gradient.addColorStop(0, `rgba(${r},${g},${b},0)`);
+          gradient.addColorStop(0.4, `rgba(${r},${g},${b},${baseAlpha * 0.4})`);
+          gradient.addColorStop(1, `rgba(${r},${g},${b},${baseAlpha * 0.8})`);
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(this.x + offsetX, this.y + offsetY, blobSize, 0, 6.3);
+          ctx.fill();
+        }
+      }
+    }
+    else {
+      ctx.fillStyle = this.color;
+      ctx.beginPath(); ctx.arc(this.x, this.y, Math.max(.1, this.size), 0, 6.3); ctx.fill();
+    }
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
 }
@@ -1641,6 +1926,30 @@ function splash(x,y,s){
   P(x,y,0,0,.8,'rgba(255,255,255,.7)',s*.2,{ring:true,grow:s*3});
 }
 function dust(x,y,s){for(let i=0;i<6;i++){const a=Math.random()*6.283;P(x,y,Math.cos(a)*s,Math.sin(a)*s,.8,'rgba(120,100,60,.5)',3+Math.random()*s*.2,{grow:s*.3,drag:.92});}}
+function createSmoke(x, y, vx, vy, life, size) {
+  // Много маленьких полупрозрачных кружочков, сильно разлетающихся в разные стороны
+  const count = 40 + Math.floor(Math.random() * 30);
+  for (let i = 0; i < count; i++) {
+    // Случайное направление
+    const angle = Math.random() * Math.PI * 2;
+    // Очень разная скорость разлёта
+    const speed = 30 + Math.random() * 80;
+    const spreadVx = Math.cos(angle) * speed;
+    const spreadVy = Math.sin(angle) * speed;
+    // Очень маленький размер
+    const particleSize = 2 + Math.random() * 4;
+    // Очень быстрое исчезновение
+    const particleLife = 0.2 + Math.random() * 0.3;
+    // Очень полупрозрачный
+    const gray = 110 + Math.floor(Math.random() * 60);
+    const alpha = 0.08 + Math.random() * 0.07;
+    const color = `rgba(${gray},${gray},${gray},${alpha})`;
+    // Большое случайное начальное смещение
+    const offsetX = (Math.random() - 0.5) * 25;
+    const offsetY = (Math.random() - 0.5) * 25;
+    P(x + offsetX, y + offsetY, vx * 0.1 + spreadVx, vy * 0.1 + spreadVy - 3, particleLife, color, particleSize, {grow: 5, drag: 0.8});
+  }
+}
 
         function createMessage(x, y, text, color) {
             if (NET.captured) NET.captured.push([Math.round(x), Math.round(y), text, color]); // отправим стрелку
